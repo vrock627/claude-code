@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Festival Hearts — a tiny dating sim</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <section id="title-screen">
+        <h1>Festival Hearts</h1>
+        <p class="subtitle">A tiny dating sim in three routes.</p>
+        <div class="title-buttons">
+          <button id="new-game">New Game</button>
+          <button id="continue">Continue</button>
+        </div>
+        <p class="credits">
+          Pick carefully. Affection is tallied quietly.
+        </p>
+      </section>
+
+      <section id="game-screen" class="hidden">
+        <div class="portrait-area">
+          <div id="portrait">✨</div>
+          <div id="speaker"></div>
+        </div>
+        <div id="dialogue" class="dialogue-box"></div>
+        <div id="choices" class="choices"></div>
+        <div id="meters" class="meters"></div>
+        <div class="toolbar">
+          <button id="save-btn">Save</button>
+          <button id="load-btn">Load</button>
+          <button id="reset-btn">Reset</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="story.js"></script>
+    <script src="game.js"></script>
+  </body>
+</html>
