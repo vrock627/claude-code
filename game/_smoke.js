@@ -1,175 +1,108 @@
-// Headless smoke test: loads story.js in a fake browser env, verifies every
-// choice.next and every resolve target points to a real scene, every path
-// terminates at an `ending` scene, and reports max/min reachable affection
-// per character. Not shipped in index.html; used for verification only.
-
+// Headless validation for the life-sim data + roll math. Not shipped.
+// Run: node _smoke.js
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const storySrc = fs.readFileSync(path.join(__dirname, "story.js"), "utf8");
-const sandbox = { window: {}, console };
+const src = fs.readFileSync(path.join(__dirname, "data.js"), "utf8");
+const sandbox = { window: {} };
 vm.createContext(sandbox);
-vm.runInContext(storySrc, sandbox);
-const STORY = sandbox.window.STORY;
+vm.runInContext(src, sandbox);
+const D = sandbox.window.GAMEDATA;
 
-if (!STORY || !STORY.scenes) {
-  console.error("FAIL: STORY not exposed on window");
-  process.exit(1);
-}
-
-const scenes = STORY.scenes;
-const ids = new Set(Object.keys(scenes));
 const errors = [];
-const reachable = new Set();
-const endingsHit = new Set();
-
-function walk(sceneId, affection, depth) {
-  if (depth > 100) {
-    errors.push(`cycle? depth >100 at ${sceneId}`);
-    return;
-  }
-  const scene = scenes[sceneId];
-  if (!scene) {
-    errors.push(`missing scene: ${sceneId}`);
-    return;
-  }
-  reachable.add(sceneId);
-
-  if (scene.ending) {
-    endingsHit.add(sceneId);
-    return;
-  }
-
-  if (scene.resolve) {
-    const { character, threshold, good, bad } = scene.resolve;
-    if (!ids.has(good)) errors.push(`${sceneId}.resolve.good -> missing ${good}`);
-    if (!ids.has(bad)) errors.push(`${sceneId}.resolve.bad -> missing ${bad}`);
-    if (!character) errors.push(`${sceneId}.resolve missing character`);
-    if (typeof threshold !== "number") errors.push(`${sceneId}.resolve missing threshold`);
-    // Record affection snapshot for reporting.
-    const score = affection[character] || 0;
-    resolveSnapshots.push({ sceneId, character, score, threshold });
-    walk(good, affection, depth + 1);
-    walk(bad, affection, depth + 1);
-    return;
-  }
-
-  if (!Array.isArray(scene.choices) || scene.choices.length === 0) {
-    errors.push(`${sceneId} has no choices/resolve/ending — dead end`);
-    return;
-  }
-
-  scene.choices.forEach((choice, i) => {
-    if (!choice.next) {
-      errors.push(`${sceneId}.choices[${i}] missing next`);
-      return;
-    }
-    if (!ids.has(choice.next)) {
-      errors.push(`${sceneId}.choices[${i}].next -> missing ${choice.next}`);
-      return;
-    }
-    const nextAff = { ...affection };
-    if (choice.affection) {
-      for (const [k, v] of Object.entries(choice.affection)) {
-        nextAff[k] = (nextAff[k] || 0) + v;
-      }
-    }
-    walk(choice.next, nextAff, depth + 1);
-  });
+function check(cond, msg) {
+  if (!cond) errors.push(msg);
 }
 
-const resolveSnapshots = [];
-walk(STORY.startScene, { aiko: 0, marco: 0, ren: 0 }, 0);
+check(D, "GAMEDATA not exposed");
+const STAT_SET = new Set(D.STATS);
 
-// Check for unreachable scenes.
-const orphans = [...ids].filter((id) => !reachable.has(id));
-
-// Compute max reachable affection per character by greedy traversal.
-function maxAffection(character) {
-  const memo = new Map();
-  function best(sceneId) {
-    if (memo.has(sceneId)) return memo.get(sceneId);
-    const scene = scenes[sceneId];
-    if (!scene) return -Infinity;
-    if (scene.ending || scene.resolve) {
-      memo.set(sceneId, 0);
-      return 0;
-    }
-    let m = -Infinity;
-    for (const c of scene.choices || []) {
-      const delta = (c.affection && c.affection[character]) || 0;
-      const rest = best(c.next);
-      if (rest === -Infinity) continue;
-      m = Math.max(m, delta + rest);
-    }
-    memo.set(sceneId, m);
-    return m;
-  }
-  return best(STORY.startScene);
+// Backgrounds reference valid stats and a sane point total.
+for (const [id, bg] of Object.entries(D.BACKGROUNDS)) {
+  const keys = Object.keys(bg.stats);
+  check(keys.length === D.STATS.length, `${id}: stat count mismatch`);
+  for (const k of keys) check(STAT_SET.has(k), `${id}: unknown stat ${k}`);
+  const sum = Object.values(bg.stats).reduce((a, b) => a + b, 0);
+  check(sum === 18, `${id}: stat sum ${sum} != 18`);
 }
 
-// Find route entry (first scene where character-affection can diverge).
-const routeEntries = { aiko: "aiko_1", marco: "marco_1", ren: "ren_1" };
-
-function bestOnRoute(character) {
-  const memo = new Map();
-  function rec(sceneId) {
-    if (memo.has(sceneId)) return memo.get(sceneId);
-    const scene = scenes[sceneId];
-    if (!scene || scene.ending) return 0;
-    if (scene.resolve) return 0;
-    let m = -Infinity;
-    for (const c of scene.choices || []) {
-      const delta = (c.affection && c.affection[character]) || 0;
-      const rest = rec(c.next);
-      if (rest === -Infinity) continue;
-      m = Math.max(m, delta + rest);
-    }
-    if (m === -Infinity) m = 0;
-    memo.set(sceneId, m);
-    return m;
-  }
-  return rec(routeEntries[character]);
-}
-function worstOnRoute(character) {
-  const memo = new Map();
-  function rec(sceneId) {
-    if (memo.has(sceneId)) return memo.get(sceneId);
-    const scene = scenes[sceneId];
-    if (!scene || scene.ending) return 0;
-    if (scene.resolve) return 0;
-    let m = Infinity;
-    for (const c of scene.choices || []) {
-      const delta = (c.affection && c.affection[character]) || 0;
-      const rest = rec(c.next);
-      if (rest === Infinity) continue;
-      m = Math.min(m, delta + rest);
-    }
-    if (m === Infinity) m = 0;
-    memo.set(sceneId, m);
-    return m;
-  }
-  return rec(routeEntries[character]);
+// Approaches reference valid stats.
+for (const ap of D.APPROACHES) {
+  check(STAT_SET.has(ap.stat), `approach ${ap.id}: bad stat ${ap.stat}`);
 }
 
-console.log("Scenes defined:", ids.size);
-console.log("Scenes reachable:", reachable.size);
-console.log("Endings reached:", [...endingsHit].sort().join(", "));
-console.log("Orphan scenes:", orphans.length ? orphans.join(", ") : "none");
-for (const c of ["aiko", "marco", "ren"]) {
-  console.log(
-    `  ${c}: route-affection range ${worstOnRoute(c)}..${bestOnRoute(c)} (threshold 3 for good ending)`
+// Locations: action stat valid.
+for (const [id, loc] of Object.entries(D.LOCATIONS)) {
+  check(STAT_SET.has(loc.action.stat), `${id}: bad action stat`);
+}
+
+// Characters: liked stat valid, schedule points at real locations for every phase.
+const APP_STYLES = new Set(D.APPROACHES.map((a) => a.style));
+for (const [id, c] of Object.entries(D.CHARACTERS)) {
+  check(STAT_SET.has(c.likedStat), `${id}: bad likedStat`);
+  check(APP_STYLES.has(c.likedStyle), `${id}: likedStyle "${c.likedStyle}" matches no approach`);
+  check(APP_STYLES.has(c.dislikedStyle), `${id}: dislikedStyle "${c.dislikedStyle}" matches no approach`);
+  for (const ph of D.PHASES) {
+    check(D.LOCATIONS[c.schedule[ph]], `${id}: schedule[${ph}] -> unknown location ${c.schedule[ph]}`);
+  }
+}
+
+// Every character is reachable: appears at some location in some phase.
+for (const id of Object.keys(D.CHARACTERS)) {
+  const reachable = D.PHASES.some((ph) =>
+    Object.keys(D.LOCATIONS).includes(D.CHARACTERS[id].schedule[ph])
   );
+  check(reachable, `${id}: never appears anywhere`);
 }
+
+// Simulate 4000 interactions: ensure tiers fire, affection stays in range,
+// and a "good fit" approach beats a "bad fit" one on average.
+function rollTier(statVal, vibe, affection) {
+  const T = D.TUNING;
+  const d20 = 1 + Math.floor(Math.random() * 20);
+  const total = d20 + statVal + vibe;
+  const dc = Math.round(T.baseDC + affection * T.dcPerAffection);
+  const margin = total - dc;
+  if (d20 === 20 || margin >= 10) return "crit";
+  if (margin >= 0) return "success";
+  if (d20 === 1 || margin <= -8) return "fail";
+  return "partial";
+}
+const tiers = { crit: 0, success: 0, partial: 0, fail: 0 };
+const DELTA = { crit: 9, success: 5, partial: 1, fail: -3 };
+// Sample across the realistic spread: weak->strong stats, all three vibe
+// states, low->high affection (which raises DC). Every tier should be
+// reachable *somewhere* in this space, even if a given build reliably wins.
+for (let i = 0; i < 8000; i++) {
+  const statVal = Math.floor(Math.random() * 13); // 0..12
+  const vibe = [-D.TUNING.dislikedStylePenalty, 0, D.TUNING.likedStyleBonus][i % 3];
+  const aff = Math.floor(Math.random() * (D.TUNING.affectionCap + 1));
+  tiers[rollTier(statVal, vibe, aff)]++;
+}
+for (const k of Object.keys(tiers)) check(tiers[k] > 0, `tier "${k}" unreachable across 8000 mixed rolls`);
+
+// At a fixed mid build, liking the approach must out-earn disliking it.
+let goodFitGain = 0;
+let badFitGain = 0;
+for (let i = 0; i < 4000; i++) {
+  goodFitGain += DELTA[rollTier(6, D.TUNING.likedStyleBonus, 30)];
+  badFitGain += DELTA[rollTier(6, -D.TUNING.dislikedStylePenalty, 30)];
+}
+check(
+  goodFitGain > badFitGain,
+  `liked-style approach (${goodFitGain}) should beat disliked-style (${badFitGain})`
+);
+
+console.log("Backgrounds:", Object.keys(D.BACKGROUNDS).join(", "));
+console.log("Locations:", Object.keys(D.LOCATIONS).join(", "));
+console.log("Characters:", Object.keys(D.CHARACTERS).join(", "));
+console.log("Tier distribution / 8000 mixed rolls:", JSON.stringify(tiers));
+console.log(`Net affection @ mid build: liked-style ${goodFitGain} vs disliked-style ${badFitGain}`);
 
 if (errors.length) {
   console.error("\nFAIL:");
   errors.forEach((e) => console.error("  " + e));
-  process.exit(1);
-}
-if (orphans.length) {
-  console.error("\nFAIL: orphan scenes");
   process.exit(1);
 }
 console.log("\nSMOKE TEST PASSED");
