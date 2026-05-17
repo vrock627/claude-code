@@ -62,15 +62,53 @@ check(!D.LOCATIONS.party, "party must be injected, not a static location");
 check(Object.values(D.LOCATIONS).some((l) => l.home), "no home");
 check(Object.values(D.LOCATIONS).some((l) => l.work), "nowhere to earn");
 
-// Date scenes well-formed.
+// Date scenes well-formed. Every scene's venue must be reachable: a
+// dateSpot (initial pick) or home (continuation-only) — and have a cost.
 for (const [loc, sc] of Object.entries(D.DATE_SCENES)) {
-  check(D.LOCATIONS[loc] && D.LOCATIONS[loc].dateSpot, `DATE_SCENE ${loc} not a dateSpot`);
-  check(sc.beats.length >= 2, `DATE_SCENE ${loc}: too few beats`);
+  const L = D.LOCATIONS[loc];
+  check(L && (L.dateSpot || L.home), `DATE_SCENE ${loc} not a dateSpot/home`);
+  check(L && L.dateCost > 0, `DATE_SCENE ${loc}: missing dateCost`);
+  check(sc.intro && sc.beats.length >= 2, `DATE_SCENE ${loc}: needs intro + >=2 beats`);
   for (const b of sc.beats) {
     check(b.opts.length >= 2, `DATE_SCENE ${loc}: beat needs options`);
     for (const o of b.opts) check(TRAIT.has(o.trait) && o.mag > 0, `DATE_SCENE ${loc}: opt "${o.text}" bad trait/mag`);
   }
 }
+check(D.DATE_SCENES.home, "home must have a date scene (Home continuation)");
+
+// Bill options.
+check(Array.isArray(D.BILL) && D.BILL.length >= 2, "BILL missing");
+let sawCheap = false, sawFull = false;
+for (const b of D.BILL) {
+  check(typeof b.id === "string" && b.text, `BILL opt missing id/text`);
+  check(b.costMul >= 0 && b.costMul <= 1, `BILL ${b.id}: costMul out of range`);
+  check(TRAIT.has(b.trait) && b.mag > 0, `BILL ${b.id}: bad trait/mag`);
+  if (b.cheap) sawCheap = true;
+  if (b.costMul === 1) sawFull = true;
+}
+check(sawCheap, "BILL needs a 'cheap' (let-her-pay) option");
+check(sawFull, "BILL needs a full-tab option");
+
+// Party content (interactive games).
+check(D.PARTY.rounds >= 2, "PARTY.rounds too low");
+check(D.PARTY.games.length >= 3, "expected 3 party games");
+for (const g of D.PARTY.games) check(g.id && g.label, "party game missing id/label");
+check(D.PARTY.truths.length && D.PARTY.dares.length, "PARTY truths/dares empty");
+for (const a of D.PARTY.askTruths.concat(D.PARTY.askDares))
+  check(a.text && TRAIT.has(a.trait) && a.mag > 0, `PARTY ask opt bad: ${a.text}`);
+
+// Effort + work modes.
+for (const [k, m] of Object.entries(D.TUNING.statModes)) {
+  check(m.label && Array.isArray(m.roll), `statMode ${k}: shape`);
+  const ps = m.roll.reduce((a, s) => a + s.p, 0);
+  check(Math.abs(ps - 1) < 0.001, `statMode ${k}: probs sum ${ps} != 1`);
+}
+for (const [k, m] of Object.entries(D.TUNING.workModes))
+  check(m.label && m.mult > 0 && m.variance >= 0, `workMode ${k}: shape`);
+
+// dateCost present everywhere it's needed.
+for (const [id, loc] of Object.entries(D.LOCATIONS))
+  if (loc.dateSpot || loc.home) check(loc.dateCost > 0, `${id}: missing dateCost`);
 
 // Characters.
 for (const [id, c] of Object.entries(D.CHARACTERS)) {
@@ -87,19 +125,28 @@ for (const [id, c] of Object.entries(D.CHARACTERS)) {
   for (const k of Object.keys(c.traitAffinity)) check(TRAIT.has(k), `${id}: traitAffinity unknown trait ${k}`);
 }
 
-// --- Fractional stat training: 0 reachable, 2 reachable, mean sane. ---
-function gainOnce() {
+// --- Fractional stat training per effort mode (mirrors rollTable). ---
+function roll(tbl) {
   let r = Math.random(), acc = 0;
-  for (const seg of T.statRoll) { acc += seg.p; if (r <= acc) return seg.min === seg.max ? seg.min : seg.min + Math.random() * (seg.max - seg.min); }
-  return 0;
+  for (const s of tbl) { acc += s.p; if (r <= acc) return s.min === s.max ? s.min : s.min + Math.random() * (s.max - s.min); }
+  const l = tbl[tbl.length - 1];
+  return l.min === l.max ? l.min : l.min + Math.random() * (l.max - l.min);
 }
-let zero = 0, big = 0, sum = 0, N = 40000;
-for (let i = 0; i < N; i++) { const g = gainOnce(); if (g === 0) zero++; if (g >= 2) big++; sum += g; }
-check(zero > 0 && big > 0, "stat gain should sometimes be 0 and sometimes 2");
-const mean = sum / N;
-check(mean > 0.4 && mean < 0.9, `stat gain mean ${mean.toFixed(2)} out of expected band`);
-const psum = T.statRoll.reduce((a, s) => a + s.p, 0);
-check(Math.abs(psum - 1) < 0.001, `statRoll probabilities sum ${psum} != 1`);
+const N = 40000;
+function profile(tbl) {
+  let z = 0, b = 0, s = 0;
+  for (let i = 0; i < N; i++) { const g = roll(tbl); if (g === 0) z++; if (g >= 2) b++; s += g; }
+  return { zero: z / N, big: b / N, mean: s / N };
+}
+const easy = profile(D.TUNING.statModes.easy.roll);
+const focused = profile(D.TUNING.statModes.focused.roll);
+const allout = profile(D.TUNING.statModes.allout.roll);
+check(easy.zero === 0 && easy.big === 0, "easy should never be 0 and never a breakthrough");
+check(focused.zero > 0 && focused.big > 0, "focused should sometimes 0, sometimes 2");
+check(allout.zero > 0.2 && allout.big > 0.2, "all-out should be genuinely boom-or-bust");
+check(allout.mean > focused.mean - 0.15, "all-out should not be strictly worse than focused on average");
+const mean = focused.mean;
+check(mean > 0.4 && mean < 0.9, `focused mean ${mean.toFixed(2)} out of band`);
 
 // --- Conversation beat tiers reachable. ---
 function tier(d20, total, dc) { const m = total - dc; if (d20 === 20 || m >= 10) return "crit"; if (m >= 0) return "success"; if (d20 === 1 || m <= -8) return "fail"; return "partial"; }
@@ -153,10 +200,16 @@ check(romGood > T.dateRomance, "a great date should out-gain a flat one");
 // --- Economy still solvent without the phone gate. ---
 check(D.LOCATIONS.cafe.work.wage > T.dailyAllowance, "a shift should beat passive allowance");
 
+const CHARS = Object.keys(D.CHARACTERS);
+check(CHARS.length >= 5, `expected >=5 characters, got ${CHARS.length}`);
+const favs = CHARS.map((id) => D.CHARACTERS[id].favoriteGift);
+check(new Set(favs).size === favs.length, "favorite gifts should be distinct per character");
+
 console.log("Backgrounds:", Object.keys(D.BACKGROUNDS).join(", "));
+console.log("Characters:", CHARS.join(", "));
 console.log("Locations:", Object.keys(D.LOCATIONS).join(", "), "| date spots:", Object.keys(D.DATE_SCENES).join(","));
 console.log("Bars:", D.BARS.join(", "));
-console.log("Stat-gain mean:", mean.toFixed(2), "| zero", (zero / N * 100 | 0) + "%", "| big", (big / N * 100 | 0) + "%");
+console.log(`Stat modes — easy ${easy.mean.toFixed(2)} | focused ${focused.mean.toFixed(2)} (0:${(focused.zero*100|0)}% 2:${(focused.big*100|0)}%) | all-out ${allout.mean.toFixed(2)} (0:${(allout.zero*100|0)}% 2:${(allout.big*100|0)}%)`);
 console.log("Beat tiers/8000:", JSON.stringify(tc));
 console.log(`Move win — hot ${moveHot.toFixed(2)} / cold ${moveCold.toFixed(2)}`);
 console.log(`Capstone — number ${numReady.toFixed(2)}, kiss ready ${kissReady.toFixed(2)}, kiss cold ${kissCold.toFixed(2)}`);
