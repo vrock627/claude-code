@@ -74,6 +74,34 @@ h2 {
   letter-spacing: 0.03em;
   color: var(--accent-2);
 }
+.hud-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.money {
+  font-weight: 700;
+  color: var(--good);
+  font-variant-numeric: tabular-nums;
+}
+.buffs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.buff {
+  background: rgba(143, 184, 232, 0.15);
+  border: 1px solid var(--accent-2);
+  color: var(--accent-2);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.74rem;
+}
+.chip.buffed {
+  background: rgba(143, 184, 232, 0.2);
+  color: var(--accent-2);
+}
 .stat-chips,
 .bg-stats {
   display: flex;
@@ -270,6 +298,29 @@ button:disabled {
 .result .primary {
   margin-top: 16px;
   width: 100%;
+}
+
+/* ---- Shop / party ---- */
+.shop-item {
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.shop-desc {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.loc-card.party {
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 22px rgba(230, 168, 199, 0.25);
+}
+.party-note {
+  color: var(--accent);
+  font-size: 0.9rem;
+  margin: -6px 0 14px;
 }
 
 /* ---- Toolbar ---- */
