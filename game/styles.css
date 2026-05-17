@@ -146,6 +146,53 @@ h2 {
   border-radius: 999px;
   transition: width 250ms ease;
 }
+.barset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+.barrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.barlbl {
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  width: 26px;
+  flex: none;
+}
+.barnum {
+  font-size: 0.66rem;
+  color: var(--muted);
+  width: 22px;
+  text-align: right;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.bar.mini {
+  height: 5px;
+  flex: 1;
+}
+.b-attraction .fill { background: #d9a441; }
+.b-affection .fill { background: #e6a8c7; }
+.b-romance .fill { background: #e2596b; }
+.b-libido .fill { background: #8f6fd6; }
+.char-line {
+  font-style: italic;
+  color: var(--accent-2);
+  margin: 6px 0 14px;
+  font-size: 1.02rem;
+}
+.choice.move {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.choice.move:hover {
+  background: rgba(230, 168, 199, 0.12);
+}
 .person-hint {
   font-size: 0.78rem;
   color: var(--accent);

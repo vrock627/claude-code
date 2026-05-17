@@ -1,106 +1,146 @@
 (function () {
   const D = window.GAMEDATA;
   const T = D.TUNING;
-  const SAVE_KEY = "lifeSimSave_v2";
-
+  const SAVE_KEY = "lifeSimSave_v3";
   let state = null;
 
-  function freshState(backgroundId) {
-    const bg = D.BACKGROUNDS[backgroundId];
+  // ---------- state ----------
+  function rollLibido(c) {
+    const [lo, hi] = c.libidoRange;
+    return lo + Math.floor(Math.random() * (hi - lo + 1));
+  }
+  function freshBars(id) {
+    return { affection: 0, romance: 0, libidoBase: rollLibido(D.CHARACTERS[id]), libidoTemp: 0, attrEvent: 0 };
+  }
+  function freshState(bgId) {
+    const bg = D.BACKGROUNDS[bgId];
+    const bars = {};
+    for (const id of Object.keys(D.CHARACTERS)) bars[id] = freshBars(id);
     return {
-      background: backgroundId,
+      background: bgId,
       stats: Object.assign({}, bg.stats),
-      day: 1,
-      phaseIndex: 0,
+      day: 1, phaseIndex: 0,
       money: T.startMoney,
-      affection: { aiko: 0, bianca: 0 },
+      bars,
       metCount: { aiko: 0, bianca: 0 },
+      milestones: { aiko: m(), bianca: m() },
       inventory: {},
-      owned: { phone: false },
       buffs: [],
-      milestones: {
-        aiko: { number: false, kiss: false, dates: 0 },
-        bianca: { number: false, kiss: false, dates: 0 },
-      },
       textedToday: { aiko: false, bianca: false },
-      partyPending: false,
+      party: null,
       partyEventDone: false,
       convo: null,
+      date: null,
     };
+    function m() { return { number: false, kiss: false, dates: 0 }; }
   }
 
-  // ---- helpers ----
-  const phaseName = () => D.PHASES[state.phaseIndex];
+  // ---------- math ----------
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  const phaseName = () => D.PHASES[state.phaseIndex];
+  const round1 = (n) => Math.round(n * 10) / 10;
 
   function effStat(s) {
     let v = state.stats[s];
     for (const b of state.buffs) if (b.stat === s) v += b.amount;
-    return v;
+    return Math.max(0, Math.floor(v));
   }
 
-  function stageFor(aff) {
+  function attraction(id) {
+    const c = D.CHARACTERS[id];
+    let base = 0;
+    for (const s of D.STATS) base += (c.attractProfile[s] || 0) * effStat(s);
+    base = clamp(Math.round(base * T.attractK), 0, T.attractBaseCap);
+    const ev = clamp(state.bars[id].attrEvent, 0, T.attractEventCap);
+    return clamp(base + ev, 0, T.barCap);
+  }
+  function barVal(id, bar) {
+    if (bar === "attraction") return attraction(id);
+    if (bar === "libido") return clamp(state.bars[id].libidoBase + state.bars[id].libidoTemp, 0, T.barCap);
+    return clamp(state.bars[id][bar], 0, T.barCap);
+  }
+  function adjustBar(id, bar, delta) {
+    if (!delta) return;
+    if (bar === "attraction") state.bars[id].attrEvent = clamp(state.bars[id].attrEvent + delta, 0, T.attractEventCap);
+    else if (bar === "libido") state.bars[id].libidoTemp += delta;
+    else state.bars[id][bar] = clamp(state.bars[id][bar] + delta, 0, T.barCap);
+  }
+  function composite(id) {
+    const w = D.CHARACTERS[id].barWeights;
+    let s = 0;
+    for (const b of D.BARS) s += (w[b] || 0) * barVal(id, b);
+    return Math.round(s);
+  }
+  function stageFor(v) {
     let s = D.STAGES[0].name;
-    for (const t of D.STAGES) if (aff >= t.min) s = t.name;
+    for (const t of D.STAGES) if (v >= t.min) s = t.name;
     return s;
   }
-
-  function isParty() {
-    return state.partyPending && phaseName() === "Night";
+  function moodOf(id) {
+    const c = composite(id);
+    return c < 15 ? "cold" : c < 35 ? "neutral" : c < 60 ? "warm" : "hot";
   }
 
+  function isPartyNow() {
+    return state.party && state.party.day === state.day && state.party.phaseIndex === state.phaseIndex;
+  }
   function presentAt(locId) {
-    if (isParty()) return locId === "club" ? Object.keys(D.CHARACTERS) : [];
-    const here = [];
-    for (const [id, c] of Object.entries(D.CHARACTERS)) {
-      if (c.schedule[phaseName()] === locId) here.push(id);
+    if (state.party && (isPartyNow() ? true : false)) {
+      // during the party night's party phase, everyone is at the party
+      if (isPartyNow()) return locId === "party" ? Object.keys(D.CHARACTERS) : [];
     }
+    const here = [];
+    for (const [id, c] of Object.entries(D.CHARACTERS)) if (c.schedule[phaseName()] === locId) here.push(id);
     return here;
   }
-
+  function scheduleParty() {
+    // next Night from now (tonight if it hasn't happened yet, else tomorrow)
+    const nightIdx = D.PHASES.indexOf("Night");
+    if (state.phaseIndex < nightIdx) state.party = { day: state.day, phaseIndex: nightIdx };
+    else state.party = { day: state.day + 1, phaseIndex: nightIdx };
+    state.partyEventDone = false;
+  }
   function maybeParty() {
-    if (state.partyPending) return false;
-    if (Math.random() < T.partyInviteChance) {
-      state.partyPending = true;
-      return true;
-    }
+    if (state.party) return false;
+    if (Math.random() < T.partyInviteChance) { scheduleParty(); return true; }
     return false;
   }
 
   function advancePhase() {
     state.convo = null;
-    state.buffs = state.buffs
-      .map((b) => ({ ...b, phasesLeft: b.phasesLeft - 1 }))
-      .filter((b) => b.phasesLeft > 0);
+    state.date = null;
+    state.buffs = state.buffs.map((b) => ({ ...b, phasesLeft: b.phasesLeft - 1 })).filter((b) => b.phasesLeft > 0);
     state.phaseIndex += 1;
     if (state.phaseIndex >= D.PHASES.length) {
       state.phaseIndex = 0;
       state.day += 1;
       state.money += T.dailyAllowance;
       state.textedToday = { aiko: false, bianca: false };
-      state.partyPending = false;
-      state.partyEventDone = false;
+      for (const id of Object.keys(D.CHARACTERS)) {
+        const c = D.CHARACTERS[id], b = state.bars[id];
+        b.affection = clamp(b.affection - c.decay.affection, 0, T.barCap);
+        b.romance = clamp(b.romance - c.decay.romance, 0, T.barCap);
+        b.libidoBase = rollLibido(c);
+        b.libidoTemp = 0;
+      }
+      if (state.party && state.party.day < state.day) { state.party = null; state.partyEventDone = false; }
     }
     renderPhase();
   }
 
-  // ---- DOM ----
+  // ---------- DOM ----------
   const screen = () => document.getElementById("screen");
-  function el(tag, cls, text) {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text != null) e.textContent = text;
-    return e;
-  }
-  function button(label, onClick, cls, disabled) {
-    const b = el("button", cls || "choice", label);
-    if (disabled) b.disabled = true;
-    else b.addEventListener("click", onClick);
-    return b;
-  }
+  function el(t, c, x) { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+  function button(label, fn, cls, dis) { const b = el("button", cls || "choice", label); if (dis) b.disabled = true; else b.addEventListener("click", fn); return b; }
   const clearScreen = () => (screen().innerHTML = "");
+  function pickN(arr, n) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a.slice(0, n);
+  }
+  const line = (s, name) => s.replace(/\{n\}/g, name);
 
-  // ---- HUD ----
+  // ---------- HUD ----------
   function renderHud() {
     const hud = document.getElementById("hud");
     const playing = !!state;
@@ -113,76 +153,75 @@
     top.appendChild(el("span", "hud-time", `Day ${state.day} · ${phaseName()}`));
     const right = el("div", "hud-right");
     right.appendChild(el("span", "money", `$${state.money}`));
-    if (state.owned.phone) right.appendChild(el("span", "chip", "📱"));
+    right.appendChild(el("span", "chip", "📱"));
     top.appendChild(right);
     hud.appendChild(top);
 
-    const statWrap = el("div", "stat-chips");
+    const sc = el("div", "stat-chips");
     for (const s of D.STATS) {
-      const e = effStat(s);
-      const buffed = e !== state.stats[s];
+      const e = effStat(s), buffed = e !== Math.floor(state.stats[s]);
+      const frac = state.stats[s] - Math.floor(state.stats[s]);
       const chip = el("span", buffed ? "chip buffed" : "chip");
-      chip.textContent = `${D.STAT_SHORT[s]} ${e}${buffed ? ` (${state.stats[s]})` : ""}`;
-      statWrap.appendChild(chip);
+      chip.textContent = `${D.STAT_SHORT[s]} ${e}${frac > 0 ? "·" : ""}`;
+      sc.appendChild(chip);
     }
-    hud.appendChild(statWrap);
+    hud.appendChild(sc);
 
     if (state.buffs.length) {
       const bw = el("div", "buffs");
-      for (const b of state.buffs) {
-        bw.appendChild(
-          el("span", "buff", `${D.STAT_SHORT[b.stat]} +${b.amount} · ${b.phasesLeft}p`)
-        );
-      }
+      for (const b of state.buffs)
+        bw.appendChild(el("span", "buff", `${D.STAT_SHORT[b.stat]} ${b.amount > 0 ? "+" : ""}${b.amount}·${b.phasesLeft}p`));
       hud.appendChild(bw);
     }
 
     const people = el("div", "people");
     for (const [id, c] of Object.entries(D.CHARACTERS)) {
-      const aff = state.affection[id];
-      const m = state.milestones[id];
+      const comp = composite(id), m = state.milestones[id];
       const card = el("div", "person");
       const marks = `${m.number ? " ☎" : ""}${m.dates ? ` 💞${m.dates}` : ""}${m.kiss ? " 💋" : ""}`;
       card.appendChild(el("div", "person-name", `${c.emoji} ${c.name}${marks}`));
-      card.appendChild(el("div", "person-stage", `${stageFor(aff)} · ${aff}/${T.affectionCap}`));
-      const bar = el("div", "bar");
-      const fill = el("div", "fill");
-      fill.style.width = `${(aff / T.affectionCap) * 100}%`;
-      bar.appendChild(fill);
-      card.appendChild(bar);
-      if (state.metCount[id] >= T.revealHintAfter) {
-        card.appendChild(el("div", "person-hint", `Likes ${D.STAT_LABEL[c.likedStat]}. ${c.hint}`));
-      } else {
-        card.appendChild(el("div", "person-hint dim", "Talk to her a few times to learn what she likes…"));
+      card.appendChild(el("div", "person-stage", `${stageFor(comp)} · Interest ${comp}`));
+      const bars = el("div", "barset");
+      for (const b of D.BARS) {
+        const v = barVal(id, b);
+        const row = el("div", "barrow");
+        row.appendChild(el("span", "barlbl", D.BAR_SHORT[b]));
+        const tr = el("div", `bar mini b-${b}`);
+        const fl = el("div", "fill");
+        fl.style.width = `${v}%`;
+        tr.appendChild(fl);
+        row.appendChild(tr);
+        row.appendChild(el("span", "barnum", String(v)));
+        bars.appendChild(row);
       }
+      card.appendChild(bars);
+      if (state.metCount[id] >= T.revealHintAfter)
+        card.appendChild(el("div", "person-hint", c.hint));
+      else
+        card.appendChild(el("div", "person-hint dim", "Talk to her a few times to read her…"));
       people.appendChild(card);
     }
     hud.appendChild(people);
   }
 
-  // ---- Title / Create ----
+  // ---------- title / create ----------
   function renderTitle() {
-    state = null;
-    renderHud();
-    clearScreen();
+    state = null; renderHud(); clearScreen();
     const w = el("div", "title");
     w.appendChild(el("h1", null, "Heartbeat City"));
-    w.appendChild(el("p", "subtitle",
-      "A tiny life-sim. Build yourself, earn a living, win someone over. No clock, no endings — just the long game."));
-    const btns = el("div", "title-buttons");
-    btns.appendChild(button("New Game", renderCreate, "primary"));
+    w.appendChild(el("p", "subtitle", "A tiny life-sim. Build yourself, read people, and win someone over. No clock, no endings — just the long game."));
+    const b = el("div", "title-buttons");
+    b.appendChild(button("New Game", renderCreate, "primary"));
     const cont = button("Continue", () => { if (loadGame()) renderPhase(); }, "choice");
     if (!hasSave()) cont.disabled = true;
-    btns.appendChild(cont);
-    w.appendChild(btns);
-    screen().appendChild(w);
+    b.appendChild(cont);
+    w.appendChild(b); screen().appendChild(w);
   }
-
   function renderCreate() {
     clearScreen();
     const w = el("div", "create");
     w.appendChild(el("h2", null, "Who are you?"));
-    w.appendChild(el("p", "subtitle", "Your background sets your starting stats. Everything after that, you earn."));
+    w.appendChild(el("p", "subtitle", "Background sets your start. Everything after, you earn — and people read you differently."));
     const grid = el("div", "bg-grid");
     for (const [id, bg] of Object.entries(D.BACKGROUNDS)) {
       const card = el("div", "bg-card");
@@ -192,190 +231,164 @@
       const st = el("div", "bg-stats");
       for (const s of D.STATS) st.appendChild(el("span", "chip", `${D.STAT_SHORT[s]} ${bg.stats[s]}`));
       card.appendChild(st);
-      card.appendChild(button("Choose", () => {
-        state = freshState(id);
-        saveGame();
-        renderPhase();
-      }, "primary"));
+      card.appendChild(button("Choose", () => { state = freshState(id); saveGame(); renderPhase(); }, "primary"));
       grid.appendChild(card);
     }
-    w.appendChild(grid);
-    screen().appendChild(w);
+    w.appendChild(grid); screen().appendChild(w);
   }
 
-  // ---- Day / phase ----
+  // ---------- phase ----------
   function renderPhase() {
-    saveGame();
-    renderHud();
-    clearScreen();
+    saveGame(); renderHud(); clearScreen();
     const w = el("div", "phase");
     w.appendChild(el("h2", null, `Day ${state.day} — ${phaseName()}`));
     w.appendChild(el("p", "subtitle", "Where to? One thing per part of the day."));
     const grid = el("div", "loc-grid");
+
+    if (isPartyNow()) {
+      const card = el("div", "loc-card party");
+      card.appendChild(el("div", "loc-emoji", "🎉"));
+      card.appendChild(el("div", "loc-name", "House Party"));
+      card.appendChild(el("div", "loc-blurb", "Somebody's place. Loud, packed, going late."));
+      card.appendChild(el("div", "loc-who", Object.values(D.CHARACTERS).map((c) => `${c.emoji} ${c.name}`).join(", ")));
+      card.appendChild(button("Go", () => renderParty(), "primary"));
+      grid.appendChild(card);
+    }
+
     for (const [id, loc] of Object.entries(D.LOCATIONS)) {
       const here = presentAt(id);
-      const partyHere = isParty() && id === "club";
-      const card = el("div", partyHere ? "loc-card party" : "loc-card");
+      const card = el("div", "loc-card");
       card.appendChild(el("div", "loc-emoji", loc.emoji));
-      card.appendChild(el("div", "loc-name", partyHere ? `${loc.name} — Party!` : loc.name));
+      card.appendChild(el("div", "loc-name", loc.name));
       card.appendChild(el("div", "loc-blurb", loc.blurb));
       const who = here.length
         ? here.map((h) => `${D.CHARACTERS[h].emoji} ${D.CHARACTERS[h].name}`).join(", ")
-        : loc.home ? "Phone, bag, rest" : "No one you know";
+        : loc.home ? "Rest, bag" : "No one you know";
       card.appendChild(el("div", "loc-who", who));
       card.appendChild(button("Go", () => renderLocation(id), "primary"));
       grid.appendChild(card);
     }
     w.appendChild(grid);
-    w.appendChild(button(`Open bag${invCount() ? ` (${invCount()})` : ""}`, () => renderBag(renderPhase), "choice subtle"));
+
+    const tools = el("div", "choices");
+    tools.appendChild(button("📱 Phone", () => renderPhone(renderPhase), "choice subtle"));
+    tools.appendChild(button(`Open bag${invCount() ? ` (${invCount()})` : ""}`, () => renderBag(renderPhase), "choice subtle"));
+    w.appendChild(tools);
     screen().appendChild(w);
   }
+  const invCount = () => Object.values(state.inventory).reduce((a, b) => a + b, 0);
 
-  function invCount() {
-    return Object.values(state.inventory).reduce((a, b) => a + b, 0);
-  }
-
-  // ---- Location ----
+  // ---------- location ----------
   function renderLocation(locId) {
     const loc = D.LOCATIONS[locId];
     if (loc.home) return renderHome();
-    if (isParty() && locId === "club" && !state.partyEventDone) return renderPartyEvent(locId);
-
-    renderHud();
-    clearScreen();
+    renderHud(); clearScreen();
     const w = el("div", "location");
-    const party = isParty() && locId === "club";
-    w.appendChild(el("h2", null, `${loc.emoji} ${loc.name}${party ? " — Party!" : ""}`));
+    w.appendChild(el("h2", null, `${loc.emoji} ${loc.name}`));
     w.appendChild(el("p", "subtitle", loc.blurb));
-    if (party) w.appendChild(el("p", "party-note", "Loud, buzzing, everyone here. Bold moves land; deep talk doesn't."));
-
     const opts = el("div", "choices");
     for (const id of presentAt(locId)) {
       const c = D.CHARACTERS[id];
-      opts.appendChild(button(`Talk to ${c.name}`, () => startConvo(id, locId), "primary"));
+      opts.appendChild(button(`Talk to ${c.name}`, () => startConvo(id, locId, false), "primary"));
     }
-    if (loc.action) {
-      const a = loc.action;
-      opts.appendChild(button(`${a.label}  (+${a.gain} ${D.STAT_SHORT[a.stat]})`,
-        () => doEnvironment(locId), "choice"));
-    }
-    if (loc.work) {
-      opts.appendChild(button(`${loc.work.label}  (+$${loc.work.wage})`,
-        () => doWork(locId), "choice"));
-    }
-    if (D.SHOPS[locId]) {
-      opts.appendChild(button("Browse the shop", () => renderShop(locId), "choice"));
-    }
-    opts.appendChild(button(`Open bag${invCount() ? ` (${invCount()})` : ""}`,
-      () => renderBag(() => renderLocation(locId)), "choice subtle"));
+    if (loc.action) opts.appendChild(button(`${loc.action.label}  (train ${D.STAT_SHORT[loc.action.stat]})`, () => doEnvironment(locId), "choice"));
+    if (loc.work) opts.appendChild(button(`${loc.work.label}  (+$${loc.work.wage})`, () => doWork(locId), "choice"));
+    if (D.SHOPS[locId]) opts.appendChild(button("Browse the shop", () => renderShop(locId), "choice"));
+    opts.appendChild(button(`Open bag${invCount() ? ` (${invCount()})` : ""}`, () => renderBag(() => renderLocation(locId)), "choice subtle"));
     opts.appendChild(button("Head out (skip)", () => advancePhase(), "choice subtle"));
-    w.appendChild(opts);
-    screen().appendChild(w);
+    w.appendChild(opts); screen().appendChild(w);
   }
 
   function doEnvironment(locId) {
-    const loc = D.LOCATIONS[locId];
-    const a = loc.action;
-    state.stats[a.stat] = clamp(state.stats[a.stat] + a.gain, 0, T.statCap);
+    const a = D.LOCATIONS[locId].action;
+    const gain = rollStatGain();
+    state.stats[a.stat] = clamp(state.stats[a.stat] + gain, 0, T.statCap);
     const lines = [a.text];
-    if (loc.social && maybeParty()) lines.push("📨 Someone slid you a party invite — tonight at Neon Club.");
-    renderResult({ title: "Time well spent", lines, tone: "good" });
+    if (gain === 0) lines.push(`It just doesn't stick today. ${D.STAT_SHORT[a.stat]} unchanged.`);
+    else if (gain < 1) lines.push(`A little progress. ${D.STAT_SHORT[a.stat]} +${gain} (now ${round1(state.stats[a.stat])}).`);
+    else lines.push(`That clicked. ${D.STAT_SHORT[a.stat]} +${gain} (now ${round1(state.stats[a.stat])}).`);
+    if (D.LOCATIONS[locId].social && maybeParty()) lines.push("📨 You scored a house-party invite.");
+    renderResult({ title: gain === 0 ? "Off day" : gain >= 2 ? "Breakthrough" : "Time well spent", lines, tone: gain === 0 ? "neutral" : "good" });
   }
-
+  function rollStatGain() {
+    let r = Math.random(), acc = 0;
+    for (const seg of T.statRoll) { acc += seg.p; if (r <= acc) return seg.min === seg.max ? seg.min : round1(seg.min + Math.random() * (seg.max - seg.min)); }
+    const last = T.statRoll[T.statRoll.length - 1];
+    return last.min === last.max ? last.min : round1(last.min + Math.random() * (last.max - last.min));
+  }
   function doWork(locId) {
     const wk = D.LOCATIONS[locId].work;
     state.money += wk.wage;
     renderResult({ title: "Shift done", lines: [wk.text, `+$${wk.wage} → $${state.money}`], tone: "good" });
   }
 
-  // ---- Home / phone ----
+  // ---------- home / phone ----------
   function renderHome() {
-    renderHud();
-    clearScreen();
+    renderHud(); clearScreen();
     const w = el("div", "location");
     w.appendChild(el("h2", null, "🏠 Home"));
-    w.appendChild(el("p", "subtitle", "Quiet. You could make some calls, or just crash."));
-    const opts = el("div", "choices");
-    if (state.owned.phone) {
-      opts.appendChild(button("Use your phone", renderPhone, "primary"));
-    } else {
-      opts.appendChild(button("Use your phone — buy one at the Mall first", null, "choice", true));
-    }
-    opts.appendChild(button(`Open bag${invCount() ? ` (${invCount()})` : ""}`,
-      () => renderBag(renderHome), "choice"));
-    opts.appendChild(button("Rest (skip to next phase)", () => advancePhase(), "choice subtle"));
-    w.appendChild(opts);
-    screen().appendChild(w);
+    w.appendChild(el("p", "subtitle", "Quiet. Crash, or sort your bag."));
+    const o = el("div", "choices");
+    o.appendChild(button("📱 Phone", () => renderPhone(renderHome), "primary"));
+    o.appendChild(button(`Open bag${invCount() ? ` (${invCount()})` : ""}`, () => renderBag(renderHome), "choice"));
+    o.appendChild(button("Rest (skip to next phase)", () => advancePhase(), "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
   }
-
-  function renderPhone() {
-    renderHud();
-    clearScreen();
+  function renderPhone(back) {
+    renderHud(); clearScreen();
     const w = el("div", "location");
     w.appendChild(el("h2", null, "📱 Phone"));
     const contacts = Object.keys(D.CHARACTERS).filter((id) => state.milestones[id].number);
-    if (!contacts.length) {
-      w.appendChild(el("p", "subtitle", "No numbers yet. Get someone's number in person first."));
-    } else {
-      w.appendChild(el("p", "subtitle", "Texting gives a small daily nudge. Schedules help you find her."));
-    }
+    w.appendChild(el("p", "subtitle", contacts.length ? "Text for a small daily nudge, peek a schedule, or set up a date." : "No numbers yet. Get one in person first."));
     const list = el("div", "choices");
     for (const id of contacts) {
       const c = D.CHARACTERS[id];
       const card = el("div", "person");
       card.appendChild(el("div", "person-name", `${c.emoji} ${c.name}`));
-      const sch = D.PHASES.map((p) => `${p}: ${D.LOCATIONS[c.schedule[p]].name}`).join(" · ");
-      card.appendChild(el("div", "person-stage", `Today — ${sch}`));
-      if (state.textedToday[id]) {
-        card.appendChild(button("Already texted today", null, "choice", true));
-      } else {
-        card.appendChild(button(`Text ${c.name}`, () => doText(id), "choice"));
-      }
+      card.appendChild(el("div", "person-stage", "Today — " + D.PHASES.map((p) => `${p}: ${D.LOCATIONS[c.schedule[p]].name}`).join(" · ")));
+      const row = el("div", "choices");
+      if (state.textedToday[id]) row.appendChild(button("Texted today", null, "choice", true));
+      else row.appendChild(button(`Text ${c.name}`, () => doText(id, back), "choice"));
+      if (composite(id) >= T.dateMinInterest) row.appendChild(button("Ask her out", () => renderDatePicker(id), "choice"));
+      else row.appendChild(button("Ask her out (warm her up more)", null, "choice", true));
+      card.appendChild(row);
       list.appendChild(card);
     }
     w.appendChild(list);
-    w.appendChild(button("Back", renderHome, "choice subtle"));
+    w.appendChild(button("Back", back, "choice subtle"));
     screen().appendChild(w);
   }
-
-  function doText(charId) {
-    const c = D.CHARACTERS[charId];
+  function doText(id, back) {
+    const c = D.CHARACTERS[id];
     const d20 = 1 + Math.floor(Math.random() * 20);
     const cha = effStat("charisma");
     const total = d20 + cha;
     const ok = total >= T.textDC;
     const gain = ok ? T.textReward : total >= T.textDC - 5 ? 1 : 0;
-    const before = state.affection[charId];
-    state.affection[charId] = clamp(before + gain, 0, T.affectionCap);
-    state.textedToday[charId] = true;
+    adjustBar(id, "affection", gain);
+    state.textedToday[id] = true;
     renderResult({
       title: "Sent",
       roll: { d20, stat: `CHA ${cha}`, vibe: 0, vibeNote: "", total, dc: T.textDC },
-      lines: [
-        ok ? `${c.name} texts back fast. Easy banter.` : gain ? `${c.name} replies, eventually.` : `Left on read. Ouch.`,
-        `Affection +${state.affection[charId] - before} → ${state.affection[charId]}`,
-      ],
+      lines: [ok ? `${c.name} texts back fast. Easy banter.` : gain ? `${c.name} replies, eventually.` : "Left on read. Ouch.", `Affection +${gain}`],
       tone: ok ? "good" : gain ? "neutral" : "bad",
-      then: renderPhone,
+      then: () => renderPhone(back),
     });
   }
 
-  // ---- Shop ----
+  // ---------- shop / bag ----------
   function renderShop(locId) {
-    renderHud();
-    clearScreen();
+    renderHud(); clearScreen();
     const w = el("div", "location");
     w.appendChild(el("h2", null, `🛒 ${D.LOCATIONS[locId].name} — Shop`));
     w.appendChild(el("p", "subtitle", `You have $${state.money}.`));
     const list = el("div", "choices");
     for (const itemId of D.SHOPS[locId]) {
       const it = D.ITEMS[itemId];
-      const owned = itemId === "phone" && state.owned.phone;
       const card = el("div", "shop-item");
       card.appendChild(el("div", "person-name", `${it.emoji} ${it.name} — $${it.price}`));
       card.appendChild(el("div", "shop-desc", it.desc));
-      if (owned) card.appendChild(button("Already owned", null, "choice", true));
-      else if (state.money < it.price) card.appendChild(button(`Can't afford ($${it.price})`, null, "choice", true));
+      if (state.money < it.price) card.appendChild(button(`Can't afford ($${it.price})`, null, "choice", true));
       else card.appendChild(button(`Buy ($${it.price})`, () => buyItem(locId, itemId), "choice"));
       list.appendChild(card);
     }
@@ -383,407 +396,361 @@
     w.appendChild(button("Done", () => renderLocation(locId), "choice subtle"));
     screen().appendChild(w);
   }
-
   function buyItem(locId, itemId) {
     const it = D.ITEMS[itemId];
     if (state.money < it.price) return;
     state.money -= it.price;
     let note;
-    if (it.type === "permStat") {
-      state.stats[it.stat] = clamp(state.stats[it.stat] + it.amount, 0, T.statCap);
-      note = `+${it.amount} ${D.STAT_SHORT[it.stat]} (permanent).`;
-    } else if (it.type === "tool") {
-      state.owned.phone = true;
-      note = "Phone activated. Texting and date plans unlocked.";
-    } else {
-      state.inventory[itemId] = (state.inventory[itemId] || 0) + 1;
-      note = it.type === "gift" ? "Tucked away for the right moment." : "In your bag — use it when it counts.";
-    }
-    renderResult({
-      title: `Bought ${it.name}`,
-      lines: [note, `$${state.money} left.`],
-      tone: "good",
-      then: () => renderShop(locId),
-    });
+    if (it.type === "permStat") { state.stats[it.stat] = clamp(state.stats[it.stat] + it.amount, 0, T.statCap); note = `+${it.amount} ${D.STAT_SHORT[it.stat]} (permanent).`; }
+    else { state.inventory[itemId] = (state.inventory[itemId] || 0) + 1; note = it.type === "gift" ? "Saved for the right moment." : "In your bag."; }
+    renderResult({ title: `Bought ${it.name}`, lines: [note, `$${state.money} left.`], tone: "good", then: () => renderShop(locId) });
   }
-
-  // ---- Bag ----
   function renderBag(back) {
-    renderHud();
-    clearScreen();
+    renderHud(); clearScreen();
     const w = el("div", "location");
     w.appendChild(el("h2", null, "🎒 Bag"));
-    w.appendChild(el("p", "subtitle", `$${state.money}${state.owned.phone ? " · 📱 phone" : ""}`));
+    w.appendChild(el("p", "subtitle", `$${state.money}`));
     const ids = Object.keys(state.inventory).filter((k) => state.inventory[k] > 0);
-    if (!ids.length) {
-      w.appendChild(el("p", "result-line", "Empty. Shops are at the gym, café, library, park and mall."));
-    }
+    if (!ids.length) w.appendChild(el("p", "result-line", "Empty. Shops: gym, café, library, park, mall."));
     const list = el("div", "choices");
     for (const id of ids) {
       const it = D.ITEMS[id];
-      const n = state.inventory[id];
       const card = el("div", "shop-item");
-      card.appendChild(el("div", "person-name", `${it.emoji} ${it.name} ×${n}`));
+      card.appendChild(el("div", "person-name", `${it.emoji} ${it.name} ×${state.inventory[id]}`));
       card.appendChild(el("div", "shop-desc", it.desc));
-      if (it.type === "tempStat") {
-        card.appendChild(button("Use now", () => useTemp(id, back), "choice"));
-      } else if (it.type === "gift") {
-        card.appendChild(button("Give during a conversation", null, "choice", true));
-      }
+      if (it.type === "tempStat") card.appendChild(button("Use now", () => useTemp(id, back), "choice"));
+      else if (it.type === "gift") card.appendChild(button("Give during a conversation", null, "choice", true));
       list.appendChild(card);
     }
     w.appendChild(list);
     w.appendChild(button("Back", back, "choice subtle"));
     screen().appendChild(w);
   }
-
-  function useTemp(itemId, back) {
-    const it = D.ITEMS[itemId];
-    state.inventory[itemId] -= 1;
+  function useTemp(id, back) {
+    const it = D.ITEMS[id];
+    state.inventory[id] -= 1;
     state.buffs.push({ stat: it.stat, amount: it.amount, phasesLeft: it.phases });
-    renderResult({
-      title: `Used ${it.name}`,
-      lines: [`+${it.amount} ${D.STAT_SHORT[it.stat]} for ${it.phases} phase(s).`],
-      tone: "good",
-      then: back,
-    });
+    renderResult({ title: `Used ${it.name}`, lines: [`+${it.amount} ${D.STAT_SHORT[it.stat]} for ${it.phases} phase(s).`], tone: "good", then: back });
   }
 
-  // ---- Party event ----
-  function renderPartyEvent(locId) {
-    renderHud();
-    clearScreen();
-    const w = el("div", "result tone-neutral");
-    w.appendChild(el("h2", null, "🍸 At the door"));
-    w.appendChild(el("p", "result-line", "A stranger presses a drink into your hand. “It's a party, relax!”"));
-    const opts = el("div", "choices");
-    opts.appendChild(button("Take the drink (bolder, fuzzier)", () => {
-      state.partyEventDone = true;
-      state.buffs.push({ stat: "charisma", amount: 4, phasesLeft: 1 });
-      state.buffs.push({ stat: "style", amount: 4, phasesLeft: 1 });
-      state.buffs.push({ stat: "intelligence", amount: -3, phasesLeft: 1 });
-      renderResult({
-        title: "Liquid courage",
-        lines: ["+4 CHA, +4 STY, −3 INT for this phase. Go get 'em."],
-        tone: "good",
-        then: () => renderLocation(locId),
-      });
-    }, "primary"));
-    opts.appendChild(button("Stay sharp, decline", () => {
-      state.partyEventDone = true;
-      renderLocation(locId);
-    }, "choice"));
-    w.appendChild(opts);
-    screen().appendChild(w);
+  // ---------- conversation ----------
+  function vibeFor(c, style, party) {
+    let v = 0; const notes = [];
+    if (style === c.likedStyle) { v += T.likedStyleBonus; notes.push("her energy"); }
+    else if (style === c.dislikedStyle) { v -= T.dislikedStylePenalty; notes.push("not her style"); }
+    if (party) { v += T.partyVibe; notes.push("party buzz"); if (style === "thoughtful") { v -= T.partyLoud; notes.push("too loud to go deep"); } }
+    return { v, note: notes.join(", ") || "neutral read" };
   }
-
-  // ---- Conversation ----
-  function convoVibe(c, approach) {
-    let vibe = 0;
-    const notes = [];
-    if (approach.style === c.likedStyle) { vibe += T.likedStyleBonus; notes.push("her energy"); }
-    else if (approach.style === c.dislikedStyle) { vibe -= T.dislikedStylePenalty; notes.push("not her style"); }
-    if (isParty()) {
-      vibe += T.partyVibe; notes.push("party buzz");
-      if (approach.style === "thoughtful") { vibe -= T.partyLoud; notes.push("too loud to go deep"); }
-    }
-    return { vibe, note: notes.join(", ") || "neutral read" };
+  function startConvo(id, locId, party) {
+    state.convo = { id, locId, beat: 0, momentum: 0, party: !!party };
+    renderConvoBeat();
   }
-
-  function startConvo(charId, locId) {
-    state.convo = { char: charId, locId, beat: 0, momentum: 0 };
-    renderBeat();
-  }
-
-  function renderBeat() {
-    renderHud();
-    clearScreen();
-    const cv = state.convo;
-    const c = D.CHARACTERS[cv.char];
+  function renderConvoBeat() {
+    renderHud(); clearScreen();
+    const cv = state.convo, c = D.CHARACTERS[cv.id], mood = moodOf(cv.id);
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `${c.emoji} ${c.name}`));
-    if (cv.beat === 0) w.appendChild(el("p", "subtitle", c.blurb));
-    w.appendChild(el("p", "talk-prompt", D.CONVO.prompts[cv.beat]));
+    w.appendChild(el("p", "char-line", line(pickN(D.LINES[mood].open, 1)[0], c.name)));
+    w.appendChild(el("p", "talk-prompt", "You —"));
     const opts = el("div", "choices");
-    for (const ap of D.APPROACHES) {
-      opts.appendChild(button(`${ap.label}  (rolls ${D.STAT_SHORT[ap.stat]})`,
-        () => resolveBeat(ap), "choice"));
-    }
-    if (cv.beat === 0) {
-      opts.appendChild(button("Back off", () => { state.convo = null; renderLocation(cv.locId); }, "choice subtle"));
-    }
-    w.appendChild(opts);
-    screen().appendChild(w);
+    for (const r of pickN(D.RESPONSES, 3))
+      opts.appendChild(button(`${r.text}`, () => resolveBeat(r), "choice"));
+    opts.appendChild(button(D.MOVE.text, () => resolveMove(), "choice move"));
+    if (cv.beat === 0) opts.appendChild(button("Back off", () => { state.convo = null; renderLocation(cv.locId); }, "choice subtle"));
+    w.appendChild(opts); screen().appendChild(w);
   }
-
-  function resolveBeat(approach) {
-    const cv = state.convo;
-    const c = D.CHARACTERS[cv.char];
-    const statVal = effStat(approach.stat);
+  function tierOf(d20, total, dc) {
+    const m = total - dc;
+    if (d20 === 20 || m >= 10) return "crit";
+    if (m >= 0) return "success";
+    if (d20 === 1 || m <= -8) return "fail";
+    return "partial";
+  }
+  function resolveBeat(r) {
+    const cv = state.convo, c = D.CHARACTERS[cv.id], mood = moodOf(cv.id);
     const d20 = 1 + Math.floor(Math.random() * 20);
-    const { vibe, note } = convoVibe(c, approach);
-    const total = d20 + statVal + vibe;
-    const dc = Math.round(T.baseDC + state.affection[cv.char] * T.dcPerAffection);
-    const margin = total - dc;
-
-    let tier;
-    if (d20 === 20 || margin >= 10) tier = "crit";
-    else if (margin >= 0) tier = "success";
-    else if (d20 === 1 || margin <= -8) tier = "fail";
-    else tier = "partial";
-
-    let delta = T.beatDelta[tier];
-    if (approach.stat === c.likedStat && delta > 0) delta += T.likedStatBonusAffection;
+    const sv = effStat(r.stat);
+    const { v, note } = vibeFor(c, r.style, cv.party);
+    const total = d20 + sv + v;
+    const dc = Math.round(T.baseDC + composite(cv.id) * T.dcPerInterest);
+    const tier = tierOf(d20, total, dc);
+    let bd = T.beatBar[tier];
+    if (r.stat === c.likedStat && bd > 0) bd += T.likedStatBonus;
+    adjustBar(cv.id, r.bar, bd);
+    if (bd > 0 && r.bar !== "affection") adjustBar(cv.id, "affection", T.beatAffSpill);
     cv.momentum += T.beatMomentum[tier];
-
-    const before = state.affection[cv.char];
-    state.affection[cv.char] = clamp(before + delta, 0, T.affectionCap);
-    const realDelta = state.affection[cv.char] - before;
-
-    const flavor = {
-      crit: `${c.name} lights up — that really landed.`,
-      success: `${c.name} warms to it.`,
-      partial: `A polite half-smile. Didn't quite land.`,
-      fail: `${c.name} cools. Misread.`,
-    }[tier];
-
-    const last = cv.beat + 1 >= D.CONVO.beats;
+    const last = cv.beat + 1 >= 2;
     renderResult({
-      title: tier === "crit" ? "Nailed it" : tier === "success" ? "Good beat" : tier === "partial" ? "Lukewarm" : "Backfired",
-      roll: { d20, stat: `${D.STAT_SHORT[approach.stat]} ${statVal}`, vibe, vibeNote: note, total, dc },
+      title: tier === "crit" ? "That lands hard" : tier === "success" ? "Good beat" : tier === "partial" ? "Lukewarm" : "Misfire",
+      roll: { d20, stat: `${D.STAT_SHORT[r.stat]} ${sv}`, vibe: v, vibeNote: note, total, dc },
       lines: [
-        flavor,
-        `Affection ${realDelta >= 0 ? "+" : ""}${realDelta} → ${state.affection[cv.char]}  ·  momentum ${cv.momentum >= 0 ? "+" : ""}${cv.momentum}`,
+        line(pickN(D.LINES[mood][tier], 1)[0], c.name),
+        `${D.BAR_LABEL[r.bar]} ${bd >= 0 ? "+" : ""}${bd}${bd > 0 && r.bar !== "affection" ? `, Affection +${T.beatAffSpill}` : ""}  ·  momentum ${cv.momentum >= 0 ? "+" : ""}${cv.momentum}`,
       ],
       tone: tier === "fail" ? "bad" : tier === "partial" ? "neutral" : "good",
-      then: () => { if (last) renderCapstone(); else { cv.beat += 1; renderBeat(); } },
+      then: () => { if (last) renderCapstone(); else { cv.beat += 1; renderConvoBeat(); } },
       thenLabel: last ? "Where to take it" : "Keep going",
     });
   }
-
-  function statFit(c) {
-    return clamp(Math.floor((effStat(c.likedStat) - 6) / 2), -2, 5);
+  function resolveMove() {
+    const cv = state.convo, c = D.CHARACTERS[cv.id];
+    const comp = composite(cv.id);
+    const d20 = 1 + Math.floor(Math.random() * 20);
+    const cha = effStat("charisma");
+    const { v, note } = vibeFor(c, D.MOVE.style, cv.party);
+    const total = d20 + cha + v;
+    const dc = Math.round(T.moveBaseDC + (comp < 60 ? (60 - comp) * T.movePerInterestMissing : 0));
+    const ok = d20 !== 1 && (d20 === 20 || total >= dc);
+    let lines, tone, title;
+    if (ok) {
+      adjustBar(cv.id, "romance", T.moveReward.romance);
+      adjustBar(cv.id, "attraction", 3);
+      const hot = barVal(cv.id, "romance") >= T.kissMinRomance && !state.milestones[cv.id].kiss;
+      if (hot) { state.milestones[cv.id].kiss = true; adjustBar(cv.id, "attraction", 4); }
+      title = "She meets you there";
+      lines = [hot ? `It tips over. ${c.name} closes the gap and kisses you back.` : `${c.name} leans in. The temperature jumps.`,
+        `Romance +${T.moveReward.romance}${hot ? " · first kiss 💋" : ""}`];
+      tone = "good";
+    } else {
+      adjustBar(cv.id, "romance", T.moveFail.romance);
+      adjustBar(cv.id, "affection", T.moveFail.affection);
+      title = "Too much, too soon";
+      lines = [`${c.name} pulls back. "Whoa — slow down."`, `Romance ${T.moveFail.romance} · Affection ${T.moveFail.affection}`];
+      tone = "bad";
+    }
+    renderResult({ title, roll: { d20, stat: `CHA ${cha}`, vibe: v, vibeNote: note, total, dc }, lines, tone, then: renderCapstone, thenLabel: "Where to take it" });
   }
-
+  function fitOf(c) { return clamp(Math.floor((effStat(c.likedStat) - 6) / 2), -2, 5); }
   function renderCapstone() {
-    renderHud();
-    clearScreen();
-    const cv = state.convo;
-    const c = D.CHARACTERS[cv.char];
-    const aff = state.affection[cv.char];
-    const m = state.milestones[cv.char];
-    const haveGift = Object.keys(state.inventory).some(
-      (k) => state.inventory[k] > 0 && D.ITEMS[k].type === "gift"
-    );
-
+    renderHud(); clearScreen();
+    const cv = state.convo, c = D.CHARACTERS[cv.id];
+    const comp = composite(cv.id), rom = barVal(cv.id, "romance"), m = state.milestones[cv.id];
+    const haveGift = Object.keys(state.inventory).some((k) => state.inventory[k] > 0 && D.ITEMS[k].type === "gift");
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `${c.emoji} ${c.name}`));
-    w.appendChild(el("p", "talk-prompt", "The conversation's warm. What now?"));
-    const opts = el("div", "choices");
-
-    opts.appendChild(button("Give her a gift",
-      () => renderGiftPicker(), "choice", !haveGift));
-
+    w.appendChild(el("p", "talk-prompt", "The moment's open. What now?"));
+    const o = el("div", "choices");
+    o.appendChild(button("Give her a gift", renderGiftPicker, "choice", !haveGift));
     if (!m.number) {
-      const ok = aff >= T.numberMinAff;
-      opts.appendChild(button(
-        ok ? `Ask for her number  (DC ${T.numberDC})` : `Ask for her number  (needs ${T.numberMinAff} affection)`,
-        () => resolvePursue("number"), "choice", !ok));
+      const ok = comp >= T.numberMinInterest;
+      o.appendChild(button(ok ? `Ask for her number  (DC ${T.numberDC})` : `Ask for her number  (needs ${T.numberMinInterest} interest)`, () => resolvePursue("number"), "choice", !ok));
     } else {
-      const need = !state.owned.phone ? "needs a phone" : aff < T.dateMinAff ? `needs ${T.dateMinAff} affection` : null;
-      opts.appendChild(button(
-        need ? `Ask her on a date  (${need})` : `Ask her on a date  (DC ${T.dateDC})`,
-        () => resolvePursue("date"), "choice", !!need));
+      const ok = comp >= T.dateMinInterest;
+      o.appendChild(button(ok ? "Ask her on a date" : `Ask her on a date  (needs ${T.dateMinInterest} interest)`, () => renderDatePicker(cv.id), "choice", !ok));
     }
-
-    {
-      const ok = aff >= T.kissMinAff;
-      opts.appendChild(button(
-        ok ? `Go in for a kiss  (DC ${T.kissDC})` : `Go in for a kiss  (needs ${T.kissMinAff} affection)`,
-        () => resolvePursue("kiss"), "choice", !ok));
-    }
-
-    opts.appendChild(button("Wrap it up warmly", () => {
-      const before = state.affection[cv.char];
-      state.affection[cv.char] = clamp(before + 1, 0, T.affectionCap);
-      renderResult({
-        title: "Good talk",
-        lines: [`You leave it on a warm note. Affection +${state.affection[cv.char] - before}.`],
-        tone: "good",
-        then: endConvo,
-        thenLabel: "Continue",
-      });
-    }, "choice subtle"));
-
-    w.appendChild(opts);
-    screen().appendChild(w);
+    const kok = rom >= T.kissMinRomance || comp >= T.kissMinInterest;
+    o.appendChild(button(kok ? `Go in for a kiss  (DC ${T.kissDC})` : `Go in for a kiss  (needs ${T.kissMinRomance} romance)`, () => resolvePursue("kiss"), "choice", !kok));
+    o.appendChild(button("Wrap it up warmly", () => { adjustBar(cv.id, "affection", 1); renderResult({ title: "Good talk", lines: ["You leave it on a warm note. Affection +1."], tone: "good", then: endConvo }); }, "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
   }
-
   function renderGiftPicker() {
-    renderHud();
-    clearScreen();
-    const cv = state.convo;
-    const c = D.CHARACTERS[cv.char];
+    renderHud(); clearScreen();
+    const cv = state.convo, c = D.CHARACTERS[cv.id];
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `Give ${c.name} something`));
-    const opts = el("div", "choices");
-    const gifts = Object.keys(state.inventory).filter(
-      (k) => state.inventory[k] > 0 && D.ITEMS[k].type === "gift"
-    );
-    for (const id of gifts) {
+    const o = el("div", "choices");
+    for (const id of Object.keys(state.inventory).filter((k) => state.inventory[k] > 0 && D.ITEMS[k].type === "gift")) {
       const it = D.ITEMS[id];
-      opts.appendChild(button(`${it.emoji} ${it.name} ×${state.inventory[id]}`,
-        () => giveGift(id), "choice"));
+      o.appendChild(button(`${it.emoji} ${it.name} ×${state.inventory[id]}`, () => giveGift(id), "choice"));
     }
-    opts.appendChild(button("Back", renderCapstone, "choice subtle"));
-    w.appendChild(opts);
-    screen().appendChild(w);
+    o.appendChild(button("Back", renderCapstone, "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
   }
-
   function giveGift(itemId) {
-    const cv = state.convo;
-    const c = D.CHARACTERS[cv.char];
-    const it = D.ITEMS[itemId];
+    const cv = state.convo, c = D.CHARACTERS[cv.id], it = D.ITEMS[itemId];
     state.inventory[itemId] -= 1;
     const fav = c.favoriteGift === itemId;
-    const gain = Math.round(it.value * (fav ? T.favoriteGiftMult : 1));
-    const before = state.affection[cv.char];
-    state.affection[cv.char] = clamp(before + gain, 0, T.affectionCap);
+    const val = Math.round(it.value * (fav ? T.favoriteGiftMult : 1));
+    adjustBar(cv.id, "affection", val);
+    adjustBar(cv.id, "romance", Math.round(val * T.giftRomanceShare));
     renderResult({
       title: fav ? `${c.name} is thrilled` : `${c.name} appreciates it`,
-      lines: [
-        fav ? `That's exactly her thing. She lights up.` : `A kind, well-received gesture.`,
-        `Affection +${state.affection[cv.char] - before} → ${state.affection[cv.char]}`,
-      ],
-      tone: "good",
-      then: renderCapstone,
-      thenLabel: "Back to her",
+      lines: [fav ? "That's exactly her thing. She lights up." : "A kind, well-received gesture.", `Affection +${val} · Romance +${Math.round(val * T.giftRomanceShare)}`],
+      tone: "good", then: renderCapstone, thenLabel: "Back to her",
     });
   }
-
   function resolvePursue(kind) {
-    const cv = state.convo;
-    const c = D.CHARACTERS[cv.char];
-    const aff = state.affection[cv.char];
-    const cha = effStat("charisma");
-    const fit = statFit(c);
-    const affBonus = Math.floor(aff / 8);
+    const cv = state.convo, c = D.CHARACTERS[cv.id];
+    const comp = composite(cv.id), rom = barVal(cv.id, "romance"), atr = barVal(cv.id, "attraction");
+    const cha = effStat("charisma"), fit = fitOf(c);
     const d20 = 1 + Math.floor(Math.random() * 20);
-    const total = d20 + cha + affBonus + cv.momentum + fit;
-    const dc = { number: T.numberDC, date: T.dateDC, kiss: T.kissDC }[kind];
-    const ok = d20 !== 1 && (d20 === 20 || total >= dc);
-
-    let title, lines, tone;
-    const before = aff;
+    let total, dc, ok, title, lines, tone;
     if (kind === "number") {
-      if (ok) {
-        state.milestones[cv.char].number = true;
-        state.affection[cv.char] = clamp(before + T.numberReward, 0, T.affectionCap);
-        title = "Got the number";
-        lines = [`${c.name} taps her number into your phone hand. "Use it."`];
-        tone = "good";
-      } else {
-        state.affection[cv.char] = clamp(before + T.numberFail, 0, T.affectionCap);
-        title = "Deflected";
-        lines = [`${c.name}: "Maybe when I know you better."`];
-        tone = "bad";
-      }
-    } else if (kind === "date") {
-      if (ok) {
-        state.milestones[cv.char].dates += 1;
-        state.affection[cv.char] = clamp(before + T.dateReward, 0, T.affectionCap);
-        title = "It's a date";
-        lines = [`${c.name} grins. "Pick somewhere good." That went somewhere real.`];
-        tone = "good";
-      } else {
-        state.affection[cv.char] = clamp(before + T.dateFail, 0, T.affectionCap);
-        title = "Rain check";
-        lines = [`${c.name}: "I'm slammed this week." Stings a little.`];
-        tone = "bad";
-      }
+      total = d20 + cha + Math.floor(comp / 8) + cv.momentum + fit;
+      dc = T.numberDC; ok = d20 !== 1 && (d20 === 20 || total >= dc);
+      if (ok) { state.milestones[cv.id].number = true; adjustBar(cv.id, "affection", T.numberReward.affection); title = "Got the number"; lines = [`${c.name}: "Use it."`, `Affection +${T.numberReward.affection}`]; tone = "good"; }
+      else { adjustBar(cv.id, "affection", T.numberFail.affection); title = "Deflected"; lines = [`${c.name}: "Maybe when I know you better."`, `Affection ${T.numberFail.affection}`]; tone = "bad"; }
     } else {
-      if (ok) {
-        state.milestones[cv.char].kiss = true;
-        state.affection[cv.char] = clamp(before + T.kissReward, 0, T.affectionCap);
-        title = "She leans in";
-        lines = [`Time slows. It lands. ${c.name} doesn't pull away.`];
-        tone = "good";
-      } else {
-        state.affection[cv.char] = clamp(before + T.kissFail, 0, T.affectionCap);
-        title = "She turns her cheek";
-        lines = [`Too soon. The air goes awkward. That cost you.`];
-        tone = "bad";
-      }
+      total = d20 + cha + Math.floor(rom / 8) + Math.floor(atr / 10) + cv.momentum;
+      dc = T.kissDC; ok = d20 !== 1 && (d20 === 20 || total >= dc);
+      if (ok) { state.milestones[cv.id].kiss = true; adjustBar(cv.id, "romance", T.kissReward.romance); adjustBar(cv.id, "attraction", T.kissReward.attractionEvent); title = "She leans in"; lines = ["Time slows. It lands.", `Romance +${T.kissReward.romance} · Attraction +${T.kissReward.attractionEvent}`]; tone = "good"; }
+      else { adjustBar(cv.id, "romance", T.kissFail.romance); adjustBar(cv.id, "affection", T.kissFail.affection); title = "She turns her cheek"; lines = ["Too soon. The air goes brittle.", `Romance ${T.kissFail.romance} · Affection ${T.kissFail.affection}`]; tone = "bad"; }
     }
-    lines.push(`Affection ${state.affection[cv.char] - before >= 0 ? "+" : ""}${state.affection[cv.char] - before} → ${state.affection[cv.char]} (${stageFor(state.affection[cv.char])})`);
+    renderResult({ title, roll: { d20, stat: `CHA ${cha}`, extra: `+ situ ${total - d20 - cha}`, total, dc }, lines, tone, then: endConvo, thenLabel: "Continue" });
+  }
+  function endConvo() {
+    const cv = state.convo; if (!cv) return advancePhase();
+    state.metCount[cv.id] += 1;
+    const revealed = state.metCount[cv.id] === T.revealHintAfter;
+    const c = D.CHARACTERS[cv.id];
+    const party = !cv.party && D.LOCATIONS[cv.locId] && D.LOCATIONS[cv.locId].social && maybeParty();
+    state.convo = null;
+    if (revealed || party)
+      renderResult({ title: "Later…", lines: [revealed ? `You're reading her now: ${c.hint}` : null, party ? "📨 You picked up a house-party invite." : null].filter(Boolean), tone: "good" });
+    else advancePhase();
+  }
 
+  // ---------- dates ----------
+  function renderDatePicker(id) {
+    state.convo = null;
+    renderHud(); clearScreen();
+    const c = D.CHARACTERS[id];
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `Take ${c.name} where?`));
+    w.appendChild(el("p", "subtitle", "The place sets the mood. Your choices on the date do the rest."));
+    const o = el("div", "choices");
+    for (const [lid, loc] of Object.entries(D.LOCATIONS)) {
+      if (!loc.dateSpot || !D.DATE_SCENES[lid]) continue;
+      o.appendChild(button(`${loc.emoji} ${loc.name}`, () => startDate(id, lid), "choice"));
+    }
+    o.appendChild(button("Not now", () => advancePhase(), "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function startDate(id, loc) {
+    state.date = { id, loc, beat: 0, picks: [] };
+    renderDateBeat();
+  }
+  function renderDateBeat() {
+    renderHud(); clearScreen();
+    const dt = state.date, c = D.CHARACTERS[dt.id], scene = D.DATE_SCENES[dt.loc];
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `🍷 Date with ${c.name} · ${D.LOCATIONS[dt.loc].name}`));
+    if (dt.beat === 0) w.appendChild(el("p", "char-line", scene.intro));
+    const b = scene.beats[dt.beat];
+    w.appendChild(el("p", "talk-prompt", b.q));
+    const o = el("div", "choices");
+    for (const opt of b.opts) o.appendChild(button(opt.text, () => { dt.picks.push(opt); dt.beat += 1; if (dt.beat >= scene.beats.length) resolveDate(); else renderDateBeat(); }, "choice"));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function resolveDate() {
+    const dt = state.date, id = dt.id, c = D.CHARACTERS[id];
+    let score = 0, magSum = 0;
+    const detail = [];
+    for (const p of dt.picks) {
+      const aff = c.traitAffinity[p.trait] || 0;
+      score += aff * p.mag; magSum += p.mag;
+      detail.push(`${p.text} — ${aff > 0 ? "she loved that" : aff < 0 ? "not her thing" : "neutral"}`);
+    }
+    const q = magSum ? score / magSum : 0; // ~ -2 .. +3
+    const romGain = Math.round(T.dateRomance + q * 4);
+    const affGain = Math.round(T.dateAffection + q * 3);
+    adjustBar(id, "romance", romGain);
+    adjustBar(id, "affection", affGain);
+    if (q > 0.5) adjustBar(id, "attraction", T.dateAttractionEvent);
+    state.milestones[id].dates += 1;
+    state.date = null;
     renderResult({
-      title,
-      roll: {
-        d20,
-        stat: `CHA ${cha}`,
-        extra: `+ aff ${affBonus} + mom ${cv.momentum} + fit ${fit}`,
-        total,
-        dc,
-      },
-      lines,
-      tone,
-      then: endConvo,
-      thenLabel: "Continue",
+      title: q > 1 ? "A great night" : q > 0 ? "A nice date" : q > -0.5 ? "An okay date" : "That fell flat",
+      lines: detail.concat([`Romance ${romGain >= 0 ? "+" : ""}${romGain} · Affection ${affGain >= 0 ? "+" : ""}${affGain}${q > 0.5 ? " · Attraction +" + T.dateAttractionEvent : ""}`]),
+      tone: q > 0 ? "good" : q > -0.5 ? "neutral" : "bad",
+      then: () => { state.metCount[id] += 1; advancePhase(); },
     });
   }
 
-  function endConvo() {
-    const cv = state.convo;
-    state.metCount[cv.char] += 1;
-    const revealed = state.metCount[cv.char] === T.revealHintAfter;
-    const c = D.CHARACTERS[cv.char];
-    const partyMsg = D.LOCATIONS[cv.locId].social && maybeParty();
-    state.convo = null;
-    if (revealed || partyMsg) {
-      renderResult({
-        title: "Later…",
-        lines: [
-          revealed ? `You're reading her now: she likes ${D.STAT_LABEL[c.likedStat]}.` : null,
-          partyMsg ? "📨 You picked up a party invite — tonight at Neon Club." : null,
-        ].filter(Boolean),
-        tone: "good",
-      });
-    } else {
-      advancePhase();
+  // ---------- party ----------
+  function renderParty() {
+    renderHud(); clearScreen();
+    const w = el("div", "location");
+    w.appendChild(el("h2", null, "🎉 House Party"));
+    w.appendChild(el("p", "subtitle", "Sticky floors, good music, everyone you know in one place."));
+    if (!state.partyEventDone) {
+      w.appendChild(el("p", "party-note", "Someone shoves a drink at you the second you walk in."));
+      const ev = el("div", "choices");
+      ev.appendChild(button("Take it (CHA/STY up, INT down)", () => { state.partyEventDone = true; state.buffs.push({ stat: "charisma", amount: 4, phasesLeft: 1 }, { stat: "style", amount: 3, phasesLeft: 1 }, { stat: "intelligence", amount: -3, phasesLeft: 1 }); renderParty(); }, "primary"));
+      ev.appendChild(button("Wave it off", () => { state.partyEventDone = true; renderParty(); }, "choice"));
+      w.appendChild(ev); screen().appendChild(w); return;
     }
+    const o = el("div", "choices");
+    for (const id of Object.keys(D.CHARACTERS)) {
+      const c = D.CHARACTERS[id];
+      o.appendChild(button(`Talk to ${c.name}`, () => startConvo(id, "party", true), "primary"));
+    }
+    for (const id of Object.keys(D.CHARACTERS)) {
+      const c = D.CHARACTERS[id];
+      o.appendChild(button(`Pull ${c.name} onto the floor (dance)`, () => partyDance(id), "choice"));
+    }
+    for (const id of Object.keys(D.CHARACTERS)) {
+      const c = D.CHARACTERS[id];
+      o.appendChild(button(`Bring ${c.name} a drink`, () => partyBuyHer(id), "choice"));
+    }
+    o.appendChild(button("Join the party game", () => partyGame(), "choice"));
+    o.appendChild(button("Slip out (skip)", () => advancePhase(), "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function partyDance(id) {
+    const c = D.CHARACTERS[id];
+    const d20 = 1 + Math.floor(Math.random() * 20);
+    const sv = Math.max(effStat("style"), effStat("charisma"));
+    const total = d20 + sv + T.partyVibe;
+    const dc = 12;
+    const tier = tierOf(d20, total, dc);
+    const rd = { crit: 12, success: 7, partial: 2, fail: -3 }[tier];
+    adjustBar(id, "romance", rd);
+    adjustBar(id, "libido", Math.max(0, Math.round(rd / 2)));
+    renderResult({
+      title: tier === "fail" ? "Out of sync" : tier === "crit" ? "You two own the floor" : "Good on the floor",
+      roll: { d20, stat: `max(STY,CHA) ${sv}`, vibe: T.partyVibe, vibeNote: "party buzz", total, dc },
+      lines: [tier === "fail" ? `${c.name} laughs it off and drifts away.` : `${c.name} stays close, breathing hard, grinning.`, `Romance ${rd >= 0 ? "+" : ""}${rd}`],
+      tone: tier === "fail" ? "bad" : "good",
+    });
+  }
+  function partyBuyHer(id) {
+    const c = D.CHARACTERS[id];
+    adjustBar(id, "libido", T.partyDrinkLibido);
+    adjustBar(id, "romance", 4);
+    adjustBar(id, "affection", 2);
+    renderResult({ title: `${c.name} clinks your glass`, lines: [`"You read my mind." She's looser now.`, `Libido +${T.partyDrinkLibido} · Romance +4 · Affection +2`], tone: "good" });
+  }
+  function partyGame() {
+    const ids = Object.keys(D.CHARACTERS);
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    const c = D.CHARACTERS[id];
+    const prompt = pickN(D.PARTY_GAME.prompts, 1)[0];
+    const d20 = 1 + Math.floor(Math.random() * 20);
+    const cha = effStat("charisma");
+    const total = d20 + cha + T.partyVibe;
+    const tier = tierOf(d20, total, 13);
+    const rd = { crit: 10, success: 6, partial: 1, fail: -4 }[tier];
+    adjustBar(id, "romance", rd);
+    if (rd > 0) adjustBar(id, "affection", 2);
+    renderResult({
+      title: "Party game",
+      roll: { d20, stat: `CHA ${cha}`, vibe: T.partyVibe, vibeNote: "party buzz", total, dc: 13 },
+      lines: [`${prompt} ${c.name}.`, tier === "fail" ? "It gets awkward fast." : tier === "crit" ? "The whole room loses it — and she's looking at you." : "Laughs all around.", `${c.name}: Romance ${rd >= 0 ? "+" : ""}${rd}${rd > 0 ? " · Affection +2" : ""}`],
+      tone: tier === "fail" ? "bad" : "good",
+    });
   }
 
-  // ---- Result ----
+  // ---------- result ----------
   function renderResult(p) {
-    saveGame();
-    renderHud();
-    clearScreen();
+    saveGame(); renderHud(); clearScreen();
     const w = el("div", `result tone-${p.tone}`);
     w.appendChild(el("h2", null, p.title));
     if (p.roll) {
-      const r = p.roll;
-      const box = el("div", "rollbox");
+      const r = p.roll, box = el("div", "rollbox");
       const sign = !r.vibe ? "" : r.vibe > 0 ? `+ ${r.vibe}` : `− ${Math.abs(r.vibe)}`;
-      const vibeTxt = sign ? `${sign} (${r.vibeNote})  ` : "";
-      const extra = r.extra ? `${r.extra}  ` : "";
-      box.appendChild(el("div", "roll-line",
-        `🎲 d20 ${r.d20}  +  ${r.stat}  ${vibeTxt}${extra}=  ${r.total}`));
+      box.appendChild(el("div", "roll-line", `🎲 d20 ${r.d20}  +  ${r.stat}  ${sign ? sign + ` (${r.vibeNote})  ` : ""}${r.extra ? r.extra + "  " : ""}=  ${r.total}`));
       box.appendChild(el("div", "roll-line dim", `vs  DC ${r.dc}`));
       w.appendChild(box);
     }
-    for (const line of p.lines) w.appendChild(el("p", "result-line", line));
+    for (const ln of p.lines) w.appendChild(el("p", "result-line", ln));
     w.appendChild(button(p.thenLabel || "Continue", p.then || advancePhase, "primary"));
     screen().appendChild(w);
   }
 
-  // ---- Persistence ----
-  function saveGame() {
-    try { if (state) localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) {}
-  }
-  function hasSave() {
-    try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
-  }
+  // ---------- persistence ----------
+  function saveGame() { try { if (state) localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) {} }
+  function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
   function loadGame() {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
@@ -793,40 +760,24 @@
       const base = freshState(p.background);
       state = Object.assign(base, p);
       state.stats = Object.assign({}, base.stats, p.stats);
-      state.affection = Object.assign({ aiko: 0, bianca: 0 }, p.affection);
+      state.bars = p.bars || base.bars;
+      for (const id of Object.keys(D.CHARACTERS)) state.bars[id] = Object.assign(freshBars(id), p.bars && p.bars[id]);
       state.metCount = Object.assign({ aiko: 0, bianca: 0 }, p.metCount);
       state.milestones = Object.assign(base.milestones, p.milestones || {});
       state.inventory = p.inventory || {};
-      state.owned = Object.assign({ phone: false }, p.owned);
       state.buffs = Array.isArray(p.buffs) ? p.buffs : [];
       state.textedToday = Object.assign({ aiko: false, bianca: false }, p.textedToday);
-      state.convo = null;
+      state.convo = null; state.date = null;
       return true;
-    } catch (e) {
-      return false;
-    }
+    } catch (e) { return false; }
   }
-
-  function flash(id, text) {
-    const b = document.getElementById(id);
-    const o = b.textContent;
-    b.textContent = text;
-    setTimeout(() => (b.textContent = o), 1100);
-  }
-
+  function flash(id, t) { const b = document.getElementById(id); const o = b.textContent; b.textContent = t; setTimeout(() => (b.textContent = o), 1100); }
   function init() {
     document.getElementById("save-btn").addEventListener("click", () => { saveGame(); flash("save-btn", "Saved ✓"); });
-    document.getElementById("load-btn").addEventListener("click", () => {
-      if (loadGame()) { renderPhase(); flash("load-btn", "Loaded ✓"); } else flash("load-btn", "No save");
-    });
-    document.getElementById("reset-btn").addEventListener("click", () => {
-      if (!window.confirm("Start over? This clears your save.")) return;
-      try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
-      renderTitle();
-    });
+    document.getElementById("load-btn").addEventListener("click", () => { if (loadGame()) { renderPhase(); flash("load-btn", "Loaded ✓"); } else flash("load-btn", "No save"); });
+    document.getElementById("reset-btn").addEventListener("click", () => { if (!window.confirm("Start over? This clears your save.")) return; try { localStorage.removeItem(SAVE_KEY); } catch (e) {} renderTitle(); });
     renderTitle();
   }
-
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();
