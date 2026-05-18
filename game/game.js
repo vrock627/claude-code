@@ -32,7 +32,7 @@
   function attraction(id) {
     const c = D.CHARACTERS[id]; let base = 0;
     for (const s of D.STATS) base += (c.attractProfile[s] || 0) * effStat(s);
-    base = clamp(Math.round(base * T.attractK), 0, T.attractBaseCap);
+    base = clamp(Math.round(base * T.attractK) + (T.attractFloor || 0), 0, T.attractBaseCap);
     return clamp(base + clamp(state.bars[id].attrEvent, 0, T.attractEventCap), 0, T.barCap);
   }
   function barVal(id, bar) {
@@ -756,7 +756,7 @@
       const r = nodeRoll(node, id), br = r.ok ? node.roll.win : node.roll.lose;
       const roll = { d20: r.roll, stat: r.statLbl ? `${r.statLbl} ${r.gauge}` : `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
       if (!r.ok && br.hard) return homeBail(br, roll);
-      if (r.ok && br.sex) return renderSexChoice(back);
+      if (r.ok && br.sex) return renderSexChoice(back, typeof br.sex === "string" ? br.sex : null);
       homeAccrue(br.fx || {});
       return renderResult({ title: r.ok ? "She's right there" : "Not quite there", roll, lines: weaveAttire(br.lines, br.fx).map((l) => subN(l, c.name)), tone: r.ok ? "good" : "bad", then: back, thenLabel: "Back" });
     }
@@ -824,7 +824,7 @@
       const r = homeRoll(state.date.id, n.roll.dc), br = r.ok ? n.roll.win : n.roll.lose;
       const roll = { d20: r.roll, stat: `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
       if (!r.ok && br.hard) return homeBail(br, roll);
-      if (r.ok && br.sex) return renderSexChoice(selfBack);
+      if (r.ok && br.sex) return renderSexChoice(selfBack, typeof br.sex === "string" ? br.sex : null);
       homeAccrue(br.fx || {});
       const nextOnWin = r.ok && n.roll.swimNext ? () => swimList(n.roll.swimNext, roomIdx) : (r.ok && n.sub ? () => descend(n.sub) : selfBack);
       return renderResult({ title: r.ok ? "She's right there" : "Not quite there", roll, lines: weaveAttire(br.lines, br.fx).map((l) => subN(l, c.name)), tone: r.ok ? "good" : "bad", then: r.ok ? nextOnWin : selfBack, thenLabel: r.ok && (n.roll.swimNext || n.sub) ? "…then" : "Back" });
@@ -934,30 +934,34 @@
     if (r.ok) return renderResult({ title: "She's with you", roll, lines: (br.lines || []).map((l) => subN(l, c.name)), tone: "good", then: () => renderHomeMenu(roomIdx, path.concat(i)), thenLabel: "…go on" });
     renderResult({ title: "Not quite there", roll, lines: br.lines.map((l) => subN(l, c.name)), tone: "bad", then: () => renderHomeMenu(roomIdx, path), thenLabel: "Back" });
   }
-  function renderSexChoice(back) {
-    const dt = state.date, c = D.CHARACTERS[dt.id], sx = placeDef().sex;
+  // variant: a string (e.g. "shoot") selects placeDef()[variant+"Sex"] and
+  // a matching D.INTIMACY[variant] beat set, so the scene + choices reflect
+  // the situation (the phone) rather than the default place prose.
+  function sexBlock(variant) { return (variant && placeDef()[variant + "Sex"]) || placeDef().sex; }
+  function renderSexChoice(back, variant) {
+    const dt = state.date, c = D.CHARACTERS[dt.id], sx = sexBlock(variant);
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `Just the two of you · ${c.name}`));
     w.appendChild(el("p", "char-line", subN(sx.ask, c.name)));
     const have = (state.inventory.condom || 0) > 0;
     const o = el("div", "choices");
-    o.appendChild(button(have ? `Use a condom  (have ${state.inventory.condom})` : "Use a condom — none in your bag", have ? () => sexResolve("condom", back) : null, "choice", !have));
-    o.appendChild(button("Go without — read her", () => sexResolve("raw", back), "choice move"));
-    o.appendChild(button("Slow it back down — not tonight", () => sexResolve("back", back), "choice subtle"));
+    o.appendChild(button(have ? `Use a condom  (have ${state.inventory.condom})` : "Use a condom — none in your bag", have ? () => sexResolve("condom", back, variant) : null, "choice", !have));
+    o.appendChild(button("Go without — read her", () => sexResolve("raw", back, variant), "choice move"));
+    o.appendChild(button("Slow it back down — not tonight", () => sexResolve("back", back, variant), "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
   }
-  function sexResolve(kind, back) {
-    const dt = state.date, id = dt.id, c = D.CHARACTERS[id], sx = placeDef().sex;
+  function sexResolve(kind, back, variant) {
+    const dt = state.date, id = dt.id, c = D.CHARACTERS[id], sx = sexBlock(variant);
     if (kind === "back") { homeAccrue(sx.back.fx); return renderResult({ title: "Not tonight, the rest", lines: sx.back.lines.map((l) => subN(l, c.name)), tone: "good", then: back, thenLabel: "Back" }); }
-    if (kind === "condom") { state.inventory.condom -= 1; homeAccrue(sx.condom.fx); return renderIntimacy(id, sx.condom.lines, renderDateEnd); }
+    if (kind === "condom") { state.inventory.condom -= 1; homeAccrue(sx.condom.fx); return renderIntimacy(id, sx.condom.lines, renderDateEnd, false, variant); }
     const ta = c.traitAffinity;
     const mod = Math.floor(barVal(id, "libido") / 12) + ((ta.adventurous || 0) > 0 ? 2 : 0) - ((ta.classy || 0) > 0 ? 2 : 0) - ((ta.sincere || 0) > 0 ? 1 : 0);
     const r = homeRoll(id, sx.raw.dc - mod);
     const roll = { d20: r.roll, stat: `read ${r.gauge} · her ${mod >= 0 ? "+" : ""}${mod}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
     if (!r.ok) return homeBail(sx.raw.lose, roll);
     homeAccrue(sx.raw.win.fx);
-    renderIntimacy(id, sx.raw.win.lines, renderDateEnd, true);
+    renderIntimacy(id, sx.raw.win.lines, renderDateEnd, true, variant);
   }
   // ---- shared, non-graphic intimacy beats (home date + party slip-away) ----
   function intimFx(id, fx) {
@@ -973,12 +977,13 @@
       dt.bestQ = Math.max(dt.bestQ, (fx.rom || 0) / 4 + (fx.inti ? fx.inti * 0.4 : 0) + 1);
     }
   }
-  function renderIntimacy(id, introLines, afterFn, raw) {
-    state.intim = { id, beat: 0, after: afterFn, log: (introLines || []).slice(), closeTone: "good", raw: !!raw, finishDone: false };
+  function renderIntimacy(id, introLines, afterFn, raw, beatsKey) {
+    state.intim = { id, beat: 0, after: afterFn, log: (introLines || []).slice(), closeTone: "good", raw: !!raw, finishDone: false, beatsKey: beatsKey || null };
     renderIntimacyBeat();
   }
   function renderIntimacyBeat() {
-    const im = state.intim, c = D.CHARACTERS[im.id], beats = D.INTIMACY.beats, F = D.INTIMACY.finish;
+    const im = state.intim, c = D.CHARACTERS[im.id], F = D.INTIMACY.finish;
+    const beats = (im.beatsKey && D.INTIMACY[im.beatsKey] && D.INTIMACY[im.beatsKey].beats) || D.INTIMACY.beats;
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `The rest of the night · ${c.name}`));
@@ -1194,8 +1199,9 @@
     if (fx.atr) adjustBar(id, "attraction", fx.atr);
     if (fx.kiss && !state.milestones[id].kiss) { state.milestones[id].kiss = true; adjustBar(id, "attraction", 3); }
   }
-  function renderPartyProtection(id, sc) {
-    const c = D.CHARACTERS[id], P = D.INTIMACY.party;
+  function renderPartyProtection(id, sc, protKey) {
+    const c = D.CHARACTERS[id], P = (protKey && D.INTIMACY[protKey]) || D.INTIMACY.party;
+    const bk = P.beats ? protKey : null;
     const after = () => privateAfter(id, sc);
     renderHud(); clearScreen();
     const w = el("div", "talk");
@@ -1203,8 +1209,8 @@
     w.appendChild(el("p", "char-line", subN(P.ask, c.name)));
     const have = (state.inventory.condom || 0) > 0;
     const o = el("div", "choices");
-    o.appendChild(button(have ? `Use a condom  (have ${state.inventory.condom})` : "Use a condom — none in your bag", have ? () => { state.inventory.condom -= 1; partyApplyFx(id, P.condom.fx); renderIntimacy(id, P.condom.lines, after, false); } : null, "choice", !have));
-    o.appendChild(button("Go without — read the moment", () => { partyApplyFx(id, P.raw.fx); renderIntimacy(id, P.raw.lines, after, true); }, "choice move"));
+    o.appendChild(button(have ? `Use a condom  (have ${state.inventory.condom})` : "Use a condom — none in your bag", have ? () => { state.inventory.condom -= 1; partyApplyFx(id, P.condom.fx); renderIntimacy(id, P.condom.lines, after, false, bk); } : null, "choice", !have));
+    o.appendChild(button("Go without — read the moment", () => { partyApplyFx(id, P.raw.fx); renderIntimacy(id, P.raw.lines, after, true, bk); }, "choice move"));
     o.appendChild(button("Slow it back down — just this", () => { partyApplyFx(id, P.back.fx); renderResult({ title: "Just this, then", lines: P.back.lines.map((l) => subN(l, c.name)), tone: "good", then: partyAfter, thenLabel: "Back" }); }, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
   }
@@ -1222,7 +1228,7 @@
     const o = el("div", "choices");
     o.appendChild(button("Yes — right here, right now", () => {
       adjustBar(id, "romance", T.privateReward.romance); adjustBar(id, "libido", T.privateReward.libido + 4); adjustBar(id, "attraction", T.privateReward.attractionEvent); bumpHeat(2);
-      renderResult({ title: "Nobody's looking anyway", lines: FS.win.map((l) => subN(l, c.name)), tone: "good", then: () => renderPartyProtection(id, sc), thenLabel: "…and then" });
+      renderResult({ title: "Nobody's looking anyway", lines: FS.win.map((l) => subN(l, c.name)), tone: "good", then: () => renderPartyProtection(id, sc, "floor"), thenLabel: "…and then" });
     }, "choice move"));
     o.appendChild(button("Pull her somewhere with a door first", () => renderHookup(id, "room"), "choice"));
     o.appendChild(button("Not in front of everyone — back off", () => { adjustBar(id, "affection", 1); renderResult({ title: "Pulled back", lines: [`You laugh it off and find your clothes; ${c.name} does too, unbothered, already plotting. Affection +1.`], tone: "good", then: partyAfter }); }, "choice subtle"));

@@ -197,12 +197,32 @@ check(!ovLoc.dateSpot, "overlook must NOT be a DATE_SCENES dateSpot (it's the ne
   check(shoot && shoot.sub, "overlook needs the 'make it a real shoot' chain");
   let deep = 0, rolls = 0;
   (function w(ns, d) { deep = Math.max(deep, d); for (const n of ns || []) { if (n.roll) rolls++; if (n.sub) w(n.sub, d + 1); } })(shoot.sub, 1);
-  check(deep >= 5, `photoshoot must be a long chain; got depth ${deep}`);
-  check(rolls >= 5, `photoshoot must have lots of rolls; got ${rolls}`);
+  check(deep >= 6, `photoshoot must be a long chain; got depth ${deep}`);
+  check(rolls >= 10, `photoshoot must have lots of rolls; got ${rolls}`);
   const flat = JSON.stringify(shoot);
+  check(/jacket/i.test(flat) && /top comes off/i.test(flat) && /the bra/i.test(flat) && /skirt/i.test(flat) && /last of it|all of it/i.test(flat), "photoshoot needs a step per clothing item");
   check(/hand me the camera|turns it on you/i.test(flat), "once nude she must offer to shoot you");
   check(/Let it all hang out/i.test(flat) && /Cover up/i.test(flat) && /Refuse/i.test(flat), "her-shooting-you needs let-it-hang/cover/refuse");
-  check(/both of us|together/i.test(flat), "needs a suggestive both-of-you option");
+  // The both-of-you / together option must sit UNDER the she-shoots-you node.
+  let camNode = null;
+  (function find(ns) { for (const n of ns || []) { if (/hand me the camera/i.test(n.label || "")) camNode = n; if (n.sub) find(n.sub); } })(shoot.sub);
+  check(camNode && /both of us|both of you|together/i.test(JSON.stringify(camNode)), "photos-together must come after she photographs you");
+  check(/"sex":"shoot"/.test(flat), "the together shot must route into the phone-aware sex block");
+})();
+// Phone-aware sex block + intimacy beats, and the contextual floor scene.
+const oss = D.OVERLOOK.shootSex;
+check(oss && oss.ask && oss.condom && oss.condom.lines.length && oss.raw && oss.raw.win.fx && oss.raw.lose.hard && oss.back, "OVERLOOK.shootSex malformed");
+check(/phone|lens|camera|record/i.test(oss.ask), "shootSex must reference the phone/camera");
+const ish = D.INTIMACY.shoot;
+check(ish && Array.isArray(ish.beats) && ish.beats.length >= 2, "INTIMACY.shoot needs beats");
+for (const b of ish.beats) { check(b.q && b.opts.length >= 2, "INTIMACY.shoot beat shape"); for (const o of b.opts) check(o.label && o.line && o.fx, "INTIMACY.shoot opt shape"); }
+check(/phone|camera|record|lens/i.test(JSON.stringify(ish)), "INTIMACY.shoot choices must be about the phone");
+const ifl = D.INTIMACY.floor;
+check(ifl && ifl.ask && ifl.condom && ifl.raw && ifl.back && Array.isArray(ifl.beats) && ifl.beats.length >= 2, "INTIMACY.floor malformed");
+check(/floor|bass|crowd|dance|room/i.test(ifl.ask + JSON.stringify(ifl.beats)), "floor scene must reflect the dance floor, not default");
+check(typeof T.attractK === "number" && T.attractK >= 5 && T.attractBaseCap >= 90 && typeof T.attractFloor === "number" && T.attractFloor > 0, "attraction tuning should read higher now");
+(function () {
+  let dummy = true;
 })();
 
 // Beach date — nested like the overlook; shore + rentable boat.
