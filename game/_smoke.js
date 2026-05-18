@@ -10,7 +10,7 @@ const errors = [];
 const check = (c, m) => { if (!c) errors.push(m); };
 const near1 = (n) => Math.abs(n - 1) < 0.001;
 const STAT = new Set(D.STATS), BAR = new Set(D.BARS), TRAIT = new Set(D.TRAITS);
-const STYLE = new Set(D.RESPONSES.map((r) => r.style).concat([D.MOVE.style]));
+const STYLE = new Set(D.SAYS.map((r) => r.style).concat([D.MOVE.style]));
 
 check(D, "GAMEDATA missing");
 
@@ -22,19 +22,22 @@ for (const [id, bg] of Object.entries(D.BACKGROUNDS)) {
   check(s === 18, `${id}: stat sum ${s} != 18`);
 }
 
-// Responses + MOVE.
-for (const r of D.RESPONSES) {
-  check(STAT.has(r.stat), `response "${r.text}": bad stat`);
-  check(BAR.has(r.bar), `response "${r.text}": bad bar`);
-  check(TRAIT.has(r.trait), `response "${r.text}": bad trait`);
+// Player dialogue pool (SAYS) + MOVE.
+for (const r of D.SAYS) {
+  check(typeof r.say === "string" && r.say.length, `SAYS line missing text`);
+  check(STAT.has(r.stat), `SAYS "${r.say}": bad stat`);
+  check(BAR.has(r.bar), `SAYS "${r.say}": bad bar`);
+  check(TRAIT.has(r.trait), `SAYS "${r.say}": bad trait`);
+  check(STYLE.has(r.style), `SAYS "${r.say}": bad style`);
 }
-check(STAT.has(D.MOVE.stat) && BAR.has(D.MOVE.bar), "MOVE bad stat/bar");
-check(D.RESPONSES.length >= 3, "need >=3 responses to draw from");
+check(STAT.has(D.MOVE.stat) && BAR.has(D.MOVE.bar) && D.MOVE.say, "MOVE bad stat/bar/say");
+check(D.SAYS.length >= 6, "need a healthy pool of lines to draw 3 from");
+check(D.SAYS.some((s) => s.probe), "some lines should be reveal probes");
 
-// Lines: every mood, every tier.
+// Reaction lines: every mood, every tier (openers now live per-character).
 for (const mood of ["cold", "neutral", "warm", "hot"]) {
   check(D.LINES[mood], `LINES missing mood ${mood}`);
-  for (const k of ["open", "crit", "success", "partial", "fail"])
+  for (const k of ["crit", "success", "partial", "fail"])
     check(D.LINES[mood] && D.LINES[mood][k] && D.LINES[mood][k].length, `LINES[${mood}].${k} empty`);
 }
 
@@ -62,40 +65,63 @@ check(!D.LOCATIONS.party, "party must be injected, not a static location");
 check(Object.values(D.LOCATIONS).some((l) => l.home), "no home");
 check(Object.values(D.LOCATIONS).some((l) => l.work), "nowhere to earn");
 
-// Date scenes well-formed. Every scene's venue must be reachable: a
-// dateSpot (initial pick) or home (continuation-only) — and have a cost.
-for (const [loc, sc] of Object.entries(D.DATE_SCENES)) {
-  const L = D.LOCATIONS[loc];
-  check(L && (L.dateSpot || L.home), `DATE_SCENE ${loc} not a dateSpot/home`);
-  check(L && L.dateCost > 0, `DATE_SCENE ${loc}: missing dateCost`);
-  check(sc.intro && sc.beats.length >= 2, `DATE_SCENE ${loc}: needs intro + >=2 beats`);
-  for (const b of sc.beats) {
-    check(b.opts.length >= 2, `DATE_SCENE ${loc}: beat needs options`);
-    for (const o of b.opts) check(TRAIT.has(o.trait) && o.mag > 0, `DATE_SCENE ${loc}: opt "${o.text}" bad trait/mag`);
-  }
-}
-check(D.DATE_SCENES.home, "home must have a date scene (Home continuation)");
-
-// Bill options.
-check(Array.isArray(D.BILL) && D.BILL.length >= 2, "BILL missing");
+// Bill is a map keyed by id. Need a full-tab and a cheap option.
 let sawCheap = false, sawFull = false;
-for (const b of D.BILL) {
-  check(typeof b.id === "string" && b.text, `BILL opt missing id/text`);
-  check(b.costMul >= 0 && b.costMul <= 1, `BILL ${b.id}: costMul out of range`);
-  check(TRAIT.has(b.trait) && b.mag > 0, `BILL ${b.id}: bad trait/mag`);
+for (const [bid, b] of Object.entries(D.BILL)) {
+  check(b.text, `BILL ${bid}: missing text`);
+  check(b.costMul >= 0 && b.costMul <= 1, `BILL ${bid}: costMul out of range`);
+  check(TRAIT.has(b.trait) && b.mag > 0, `BILL ${bid}: bad trait/mag`);
   if (b.cheap) sawCheap = true;
   if (b.costMul === 1) sawFull = true;
 }
 check(sawCheap, "BILL needs a 'cheap' (let-her-pay) option");
 check(sawFull, "BILL needs a full-tab option");
 
-// Party content (interactive games).
-check(D.PARTY.rounds >= 2, "PARTY.rounds too low");
-check(D.PARTY.games.length >= 3, "expected 3 party games");
-for (const g of D.PARTY.games) check(g.id && g.label, "party game missing id/label");
-check(D.PARTY.truths.length && D.PARTY.dares.length, "PARTY truths/dares empty");
-for (const a of D.PARTY.askTruths.concat(D.PARTY.askDares))
-  check(a.text && TRAIT.has(a.trait) && a.mag > 0, `PARTY ask opt bad: ${a.text}`);
+// Date scenes: reachable venue (dateSpot or home), a numeric dateCost
+// (0 = free, allowed), intro + beats, and any bill must reference real
+// BILL ids.
+for (const [loc, sc] of Object.entries(D.DATE_SCENES)) {
+  const L = D.LOCATIONS[loc];
+  check(L && (L.dateSpot || L.home), `DATE_SCENE ${loc} not a dateSpot/home`);
+  check(L && typeof L.dateCost === "number" && L.dateCost >= 0, `DATE_SCENE ${loc}: bad dateCost`);
+  check(sc.intro && sc.beats.length >= 2, `DATE_SCENE ${loc}: needs intro + >=2 beats`);
+  for (const b of sc.beats) {
+    check(b.opts.length >= 2, `DATE_SCENE ${loc}: beat needs options`);
+    for (const o of b.opts) check(TRAIT.has(o.trait) && o.mag > 0, `DATE_SCENE ${loc}: opt "${o.text}" bad trait/mag`);
+  }
+  if (sc.bill) {
+    check(Array.isArray(sc.bill.options) && sc.bill.options.length, `DATE_SCENE ${loc}: empty bill.options`);
+    for (const bid of sc.bill.options) check(D.BILL[bid], `DATE_SCENE ${loc}: bill option "${bid}" not in BILL`);
+    check(L.dateCost > 0, `DATE_SCENE ${loc}: has a bill but $0 cost`);
+  } else {
+    check(L.dateCost === 0, `DATE_SCENE ${loc}: no bill but nonzero cost ($${L.dateCost})`);
+  }
+}
+check(D.DATE_SCENES.home, "home must have a date scene (Home continuation)");
+check(D.DATE_SCENES.restaurant && D.DATE_SCENES.restaurant.bill, "restaurant should have a bill");
+check(D.DATE_SCENES.park && !D.DATE_SCENES.park.bill, "park should be free (no bill)");
+
+// Date-ending dialogue.
+check(Array.isArray(D.DATE_END) && D.DATE_END.length >= 2, "DATE_END missing");
+const endKinds = new Set(D.DATE_END.map((e) => e.kind));
+for (const e of D.DATE_END) check(e.say && ["gracious", "eager", "forward", "cool"].includes(e.kind), `DATE_END bad: ${e.say}`);
+check(endKinds.has("eager"), "DATE_END needs the risky 'eager' option");
+
+// Party content (interactive, multi-round, subset of guests).
+check(D.PARTY.rounds >= 4, "PARTY.rounds should be a real night");
+check(D.PARTY.gameRounds >= 2, "PARTY.gameRounds too low");
+check(D.PARTY.guestsMin >= 1 && D.PARTY.guestsMax >= D.PARTY.guestsMin && D.PARTY.guestsMax < Object.keys(D.CHARACTERS).length, "PARTY guest range should be a real subset");
+check(Array.isArray(D.PARTY.games) && ["truthdare", "spin", "pong"].every((g) => D.PARTY.games.includes(g)), "PARTY.games must include the three games");
+check(D.PARTY.flows.length >= 2 && D.PARTY.flows[0].at === 0, "PARTY.flows must start at 0");
+for (const f of D.PARTY.flows) check(typeof f.at === "number" && f.name && f.desc, "PARTY flow shape");
+check(D.PARTY.dance.length >= 3, "expected casual/dirty/handsy dance modes");
+for (const m of D.PARTY.dance) check(m.id && m.label && m.rom >= 0 && m.gateFlow >= 0 && m.gateRecept >= 0, `PARTY dance ${m.id}: shape`);
+check(D.PARTY.dance.some((m) => m.gateFlow === 0) && D.PARTY.dance.some((m) => m.gateFlow >= 2), "dance modes should span casual→gated");
+check(D.PARTY.truths.length && D.PARTY.dares.length && D.PARTY.spicyTruths.length && D.PARTY.spicyDares.length, "PARTY truths/dares (+spicy) empty");
+check(D.PARTY.guestBeats.length && D.PARTY.spicyGuestBeats.length, "PARTY guest narration pools empty");
+for (const s of D.PARTY.guestBeats.concat(D.PARTY.spicyGuestBeats)) check(s.includes("{n}"), `guest beat missing {n}: ${s}`);
+for (const a of D.PARTY.askTruths.concat(D.PARTY.askDares)) check(a.text && TRAIT.has(a.trait) && a.mag > 0, `PARTY ask opt bad: ${a.text}`);
+check(D.PARTY.privateGateFlow >= 1 && D.PARTY.privateGateInterest >= 20, "private-room gates should be meaningful");
 
 // Effort + work modes.
 for (const [k, m] of Object.entries(D.TUNING.statModes)) {
@@ -106,14 +132,18 @@ for (const [k, m] of Object.entries(D.TUNING.statModes)) {
 for (const [k, m] of Object.entries(D.TUNING.workModes))
   check(m.label && m.mult > 0 && m.variance >= 0, `workMode ${k}: shape`);
 
-// dateCost present everywhere it's needed.
+// dateCost is a number everywhere it's needed (0 = free venue).
 for (const [id, loc] of Object.entries(D.LOCATIONS))
-  if (loc.dateSpot || loc.home) check(loc.dateCost > 0, `${id}: missing dateCost`);
+  if (loc.dateSpot || loc.home) check(typeof loc.dateCost === "number" && loc.dateCost >= 0, `${id}: missing dateCost`);
+
+// New-bar / reveal tuning present.
+check(typeof T.revealAfter === "number", "TUNING.revealAfter missing");
+check(T.danceFail && T.privateReward && T.privateFail, "TUNING dance/private rewards missing");
 
 // Characters.
 for (const [id, c] of Object.entries(D.CHARACTERS)) {
   check(STAT.has(c.likedStat), `${id}: likedStat`);
-  check(STYLE.has(c.likedStyle) && STYLE.has(c.dislikedStyle), `${id}: liked/disliked style not used by any response`);
+  check(STYLE.has(c.likedStyle) && STYLE.has(c.dislikedStyle), `${id}: liked/disliked style not used by any line`);
   check(D.ITEMS[c.favoriteGift] && D.ITEMS[c.favoriteGift].type === "gift", `${id}: favoriteGift not a gift`);
   for (const ph of D.PHASES) check(D.LOCATIONS[c.schedule[ph]], `${id}: schedule ${ph}`);
   const ap = D.STATS.reduce((s, k) => s + (c.attractProfile[k] || 0), 0);
@@ -123,6 +153,12 @@ for (const [id, c] of Object.entries(D.CHARACTERS)) {
   check(c.libidoRange[0] >= 0 && c.libidoRange[1] <= 100 && c.libidoRange[0] < c.libidoRange[1], `${id}: libidoRange`);
   check(c.decay.affection >= 0 && c.decay.romance >= 0, `${id}: decay`);
   for (const k of Object.keys(c.traitAffinity)) check(TRAIT.has(k), `${id}: traitAffinity unknown trait ${k}`);
+  // Per-character openers (every mood) + reveals.
+  check(c.opens, `${id}: missing opens`);
+  for (const mood of ["cold", "neutral", "warm", "hot"])
+    check(c.opens && Array.isArray(c.opens[mood]) && c.opens[mood].length, `${id}: opens.${mood} empty`);
+  check(Array.isArray(c.reveals) && c.reveals.length >= 3, `${id}: needs >=3 reveals`);
+  check(c.reveals.every((r) => typeof r === "string" && r.length), `${id}: bad reveal text`);
 }
 
 // --- Fractional stat training per effort mode (mirrors rollTable). ---
