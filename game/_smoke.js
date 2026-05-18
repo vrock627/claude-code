@@ -125,7 +125,7 @@ let sawChance = false, sawRoll = false, sawHard = false, sawKissFx = false, sawS
       if (n.roll.win.kiss || (n.roll.win.fx && n.roll.win.fx.kiss)) sawKissFx = true;
     }
     if (n.fx) check(typeof n.fx === "object", `HOME fx bad: ${n.label}`);
-    if (!n.sub && !n.roll && !n.chance && !n.rooms && !n.back) check(n.lines && n.lines.length, `HOME terminal no lines: ${n.label}`);
+    if (!n.sub && !n.roll && !n.chance && !n.rooms && !n.back && !n.hercall) check(n.lines && n.lines.length, `HOME terminal no lines: ${n.label}`);
   }
 })(D.HOME.rooms.flatMap((r) => r.actions), 0);
 check(sawChance, "HOME needs the contextual (hot-tub/swim) check");
@@ -327,6 +327,22 @@ for (const node of D.INTIMACY.beats.concat([D.INTIMACY.close])) {
   for (const op of node.opts) check(op.label && op.line && op.fx && typeof op.fx === "object", `INTIMACY opt malformed: ${op.label}`);
 }
 check(D.INTIMACY.close.opts.some((o) => o.tone), "INTIMACY close should set a tone");
+// Post-sex options reflect the situation: round two + clean-up-and-leave,
+// and context closes (camera for the shoot, the floor, the party).
+check(D.INTIMACY.close.opts.some((o) => o.again), "general close needs a round-two option");
+check(D.INTIMACY.close.opts.some((o) => /clean up|heads out|leave/i.test(o.label)), "general close needs a clean-up/leave option");
+for (const key of ["shoot", "floor", "party"]) {
+  const cl = D.INTIMACY[key].close;
+  check(cl && cl.q && cl.opts.length >= 3, `INTIMACY.${key}.close missing/short`);
+  for (const op of cl.opts) check(op.label && op.line && op.fx, `INTIMACY.${key}.close opt malformed: ${op.label}`);
+  check(cl.opts.some((o) => o.again), `INTIMACY.${key}.close needs a round-two`);
+}
+check(/film|delete|keep|airdrop|record|phone|photo/i.test(JSON.stringify(D.INTIMACY.shoot.close)), "shoot close must decide what happens to the footage");
+// "Whatever you're comfortable with" — she picks safe vs spicy.
+let herCall = null;
+(function find(ns) { for (const n of ns || []) { if (n.hercall) herCall = n; if (n.sub) find(n.sub); if (n.actions) find(n.actions); } })(D.HOME.rooms);
+check(herCall && herCall.ustep === "hercall" && herCall.hercall.safe && herCall.hercall.spicy, "undress needs a 'her call' (safe vs spicy) node");
+check(herCall.hercall.safe.fx && herCall.hercall.safe.lines && herCall.hercall.spicy.fx && herCall.hercall.spicy.lines, "her-call branches malformed");
 const F = D.INTIMACY.finish;
 check(F && F.q && F.pull && F.inside, "INTIMACY.finish needs q/pull/inside");
 for (const k of ["pull", "inside"]) check(F[k].label && F[k].line && F[k].fx, `INTIMACY.finish.${k} malformed`);

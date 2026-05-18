@@ -713,6 +713,7 @@
       if (child.rooms) return o.appendChild(button(child.label || "Go somewhere else", renderHomeRooms, "choice subtle"));
       if (child.back) return o.appendChild(button(child.label || "Back", () => renderHomeMenu(roomIdx, path.slice(0, -1)), "choice subtle"));
       if (gateMissing(child.gate)) return o.appendChild(button(`${child.label} — she's not there yet`, null, "choice", true));
+      if (child.hercall) return o.appendChild(button(child.label, () => homeHerCall(child, roomIdx, path), "choice move"));
       const hot = child.roll && child.roll.win && (child.roll.win.kiss || child.roll.win.sex);
       if (child.sub && child.roll) return o.appendChild(button(child.label, () => homeResolveInto(child, roomIdx, path, i), hot ? "choice move" : "choice"));
       if (child.sub) return o.appendChild(button(child.label, () => renderHomeMenu(roomIdx, path.concat(i)), "choice"));
@@ -766,6 +767,24 @@
   function homeResolve(child, roomIdx, path) {
     if (child.chance) return homeSwim(roomIdx, path);
     homeResolveNode(child, () => renderHomeMenu(roomIdx, path));
+  }
+  // "Whatever you're comfortable with": she picks safe vs spicy from her
+  // mood + personality, and (spicy) decides which article goes herself.
+  function homeHerCall(child, roomIdx, path) {
+    const dt = state.date, id = dt.id, c = D.CHARACTERS[id], ta = c.traitAffinity || {};
+    const md = moodOf(id), mf = md === "hot" ? 16 : md === "warm" ? 7 : md === "cold" ? -14 : 0;
+    const score = composite(id) + barVal(id, "romance") * 0.5 + barVal(id, "libido") * 0.5 + (dt.home.inti || 0) * 2
+      + (ta.adventurous || 0) * 8 + (ta.independent || 0) * 5 - (ta.classy || 0) * 6 - (ta.sincere || 0) * 3 + mf;
+    const spicy = score >= 78;
+    const br = spicy ? child.hercall.spicy : child.hercall.safe;
+    const fx = Object.assign({}, br.fx || {});
+    if (spicy) {
+      const un = dt.home.un || {};
+      const next = ["bra", "shirt", "pants", "panties"].find((k) => !un[k]);
+      if (next && !(next === "panties" && barVal(id, "romance") < 48)) fx.un = next;
+    }
+    homeAccrue(fx);
+    renderResult({ title: spicy ? "She decides — and she's not shy about it" : "She keeps it exactly where she wants it", lines: weaveAttire(br.lines, fx).map((l) => subN(l, c.name)), tone: "good", then: () => renderHomeMenu(roomIdx, path), thenLabel: "Back" });
   }
   const SWIM_ENTER = { inTub: "The water's hot enough to hurt for a second, then exactly right. The night goes very quiet around the two of you.", getOut: "Steam pouring off both of you into the cold dark. There's a way to do this part." };
   function swimNamed(name) { return placeDef().swim[name] || []; }
@@ -882,11 +901,12 @@
     switch (child.ustep) {
       case "begin": return a !== "bare";
       case "shirt": return !post && !un.shirt;
-      case "bra": return !post && un.shirt && !un.bra;
-      case "chest": return !post && un.bra && !un.pants;
+      case "bra": return !post && !un.bra;
+      case "chest": return !post && (un.bra || un.shirt);
       case "pants": return !post && !un.pants;
-      case "panties": return !post && un.pants && !un.panties;
-      case "rest": return !!un.panties;
+      case "panties": return !post && !un.panties;
+      case "hercall": return !post;
+      case "rest": return !!un.panties || (!post && un.shirt && un.bra && un.pants);
       case "bareall": return a === "bare";
       default: return true;
     }
@@ -978,7 +998,7 @@
     }
   }
   function renderIntimacy(id, introLines, afterFn, raw, beatsKey) {
-    state.intim = { id, beat: 0, after: afterFn, log: (introLines || []).slice(), closeTone: "good", raw: !!raw, finishDone: false, beatsKey: beatsKey || null };
+    state.intim = { id, beat: 0, rounds: 0, after: afterFn, log: (introLines || []).slice(), closeTone: "good", raw: !!raw, finishDone: false, beatsKey: beatsKey || null };
     renderIntimacyBeat();
   }
   function renderIntimacyBeat() {
@@ -1007,11 +1027,17 @@
         renderIntimacyBeat();
       }, "choice move"));
     } else {
-      const node = D.INTIMACY.close;
+      const ctx = im.beatsKey && D.INTIMACY[im.beatsKey] && D.INTIMACY[im.beatsKey].close;
+      const node = ctx || D.INTIMACY.close;
       w.appendChild(el("p", "talk-prompt", node.q));
-      node.opts.forEach((opt) => o.appendChild(button(opt.label, () => {
-        intimFx(im.id, opt.fx); im.log.push(opt.line); im.closeTone = opt.tone || "good"; finishIntimacy();
-      }, "choice")));
+      node.opts.forEach((opt) => {
+        if (opt.again && (im.rounds || 0) >= 3) return; // sanity cap on round N
+        o.appendChild(button(opt.label, () => {
+          intimFx(im.id, opt.fx); im.log.push(opt.line); im.closeTone = opt.tone || "good";
+          if (opt.again) { im.rounds = (im.rounds || 0) + 1; im.beat = 0; im.finishDone = false; renderIntimacyBeat(); }
+          else finishIntimacy();
+        }, opt.again ? "choice move" : "choice"));
+      });
     }
     w.appendChild(o); screen().appendChild(w);
   }
@@ -1200,8 +1226,9 @@
     if (fx.kiss && !state.milestones[id].kiss) { state.milestones[id].kiss = true; adjustBar(id, "attraction", 3); }
   }
   function renderPartyProtection(id, sc, protKey) {
-    const c = D.CHARACTERS[id], P = (protKey && D.INTIMACY[protKey]) || D.INTIMACY.party;
-    const bk = P.beats ? protKey : null;
+    protKey = protKey || "party";
+    const c = D.CHARACTERS[id], P = D.INTIMACY[protKey] || D.INTIMACY.party;
+    const bk = (P.beats || P.close) ? protKey : null;
     const after = () => privateAfter(id, sc);
     renderHud(); clearScreen();
     const w = el("div", "talk");
