@@ -97,9 +97,42 @@ for (const [loc, sc] of Object.entries(D.DATE_SCENES)) {
     check(L.dateCost === 0, `DATE_SCENE ${loc}: no bill but nonzero cost ($${L.dateCost})`);
   }
 }
-check(D.DATE_SCENES.home, "home must have a date scene (Home continuation)");
+check(!D.DATE_SCENES.home, "home is now the deep HOME tree, not a DATE_SCENE");
 check(D.DATE_SCENES.restaurant && D.DATE_SCENES.restaurant.bill, "restaurant should have a bill");
 check(D.DATE_SCENES.park && !D.DATE_SCENES.park.bill, "park should be free (no bill)");
+
+// Deep home date: rooms → nested actions, gates, rolls, swim contextual.
+check(D.HOME && D.HOME.intro.includes("{n}"), "HOME.intro must address her ({n})");
+check(D.HOME.bedroomGate && D.HOME.bedroomGate.inti > 0 && D.HOME.bedroomGate.rom > 0, "HOME.bedroomGate must be meaningful");
+const roomKeys = D.HOME.rooms.map((r) => r.key);
+for (const need of ["living", "kitchen", "yard", "bedroom"]) check(roomKeys.includes(need), `HOME missing room ${need}`);
+let sawChance = false, sawRoll = false, sawNested = false, sawHard = false, sawKissFx = false;
+(function walk(nodes, depth) {
+  for (const n of nodes) {
+    check(n.rooms || n.back || n.label, "HOME node needs a label/nav");
+    if (n.gate) check(n.gate.inti > 0 || n.gate.rom > 0 || n.gate.lib > 0, `HOME gate empty: ${n.label}`);
+    if (n.chance) sawChance = true;
+    if (n.sub) { sawNested = sawNested || depth >= 0; check(n.sub.length >= 2, `HOME sub too small: ${n.label}`); walk(n.sub, depth + 1); }
+    if (n.roll) {
+      sawRoll = true;
+      check(n.roll.dc > 0 && n.roll.win && n.roll.lose, `HOME roll malformed: ${n.label}`);
+      check(n.roll.win.lines && n.roll.win.lines.length, `HOME roll win no lines: ${n.label}`);
+      check(n.roll.lose.lines && n.roll.lose.lines.length, `HOME roll lose no lines: ${n.label}`);
+      if (n.roll.lose.hard) sawHard = true;
+      if (n.roll.win.kiss) sawKissFx = true;
+    }
+    if (n.fx) check(typeof n.fx === "object", `HOME fx bad: ${n.label}`);
+    if (!n.sub && !n.roll && !n.chance && !n.rooms && !n.back) check(n.lines && n.lines.length, `HOME terminal no lines: ${n.label}`);
+  }
+})(D.HOME.rooms.flatMap((r) => r.actions), 0);
+check(sawChance, "HOME needs the contextual (hot-tub/swim) check");
+check(sawRoll && sawHard && sawKissFx, "HOME needs rolls incl. a hard-fail and a kiss payoff");
+check(sawNested, "HOME needs nested sub-menus (e.g. couch → make out)");
+check(D.HOME.swim && D.HOME.swim.hasSuit && D.HOME.swim.noSuit.length >= 3, "HOME.swim needs has-suit + 3 no-suit options");
+check(D.HOME.swim.noSuit.some((o) => o.roll && o.roll.lose.hard), "skinny-dip should carry a real risk");
+check(D.HOME.rooms.every((r) => r.actions.some((a) => a.rooms)), "every room needs a 'go somewhere else'");
+check(D.PARTY.kissDare && typeof D.PARTY.kissDare === "string", "PARTY.kissDare prompt missing");
+for (const b of D.PARTY.guestBeats.concat(D.PARTY.spicyGuestBeats)) check(b.length > 40, `guest beat too vague: ${b}`);
 
 // Date-ending dialogue.
 check(Array.isArray(D.DATE_END) && D.DATE_END.length >= 2, "DATE_END missing");

@@ -495,7 +495,9 @@
   }
   function startDate(id, loc) {
     if (!state.date) state.date = { id, venuesDone: 0, spent: 0, totRom: 0, totAff: 0, bestQ: -9, used: [] };
-    state.date.venue = loc; state.date.beat = 0; state.date.picks = [];
+    state.date.venue = loc;
+    if (loc === "home") return startHome();
+    state.date.beat = 0; state.date.picks = [];
     renderDateBeat();
   }
   function renderDateBeat() {
@@ -554,7 +556,7 @@
     const dt = state.date, c = D.CHARACTERS[dt.id], rom = barVal(dt.id, "romance");
     const canMore = dt.venuesDone < T.maxDateVenues && lastQ >= T.dateContinueMinQ;
     const venues = Object.entries(D.LOCATIONS).filter(([lid, loc]) => D.DATE_SCENES[lid] && loc.dateSpot && !dt.used.includes(lid));
-    const homeOK = D.DATE_SCENES.home && !dt.used.includes("home") && rom >= T.homeContinueMinRomance;
+    const homeOK = D.HOME && !dt.used.includes("home") && rom >= T.homeContinueMinRomance;
     if (!canMore || (!venues.length && !homeOK)) return renderDateEnd();
     renderHud(); clearScreen();
     const w = el("div", "talk");
@@ -593,6 +595,138 @@
       title: dt.bestQ > 1 ? "An unforgettable night" : dt.bestQ > 0 ? "A good night" : "That was a slog",
       lines: [endLine, `${venues}.`, `Total: Romance ${dt.totRom + er >= 0 ? "+" : ""}${dt.totRom + er} · Affection ${dt.totAff + ea >= 0 ? "+" : ""}${dt.totAff + ea} · $${dt.spent} spent.`, dt.used.includes("home") ? "Some of the night you keep to yourself." : null].filter(Boolean),
       tone: dt.bestQ > 0 ? "good" : "neutral", then: () => { state.metCount[id] += 1; advancePhase(); },
+    });
+  }
+
+  // ---------- home date: deep, explorable ----------
+  const subN = (s, name) => String(s).replace(/\{n\}/g, name);
+  function bedroomUnlocked() {
+    const dt = state.date, g = D.HOME.bedroomGate;
+    return dt.home.inti >= g.inti && barVal(dt.id, "romance") >= g.rom;
+  }
+  function startHome() {
+    const dt = state.date, c = D.CHARACTERS[dt.id];
+    dt.home = { inti: 0, loosen: false, swim: null };
+    if (!dt.used.includes("home")) dt.used.push("home");
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `🏠 Home · with ${c.name}`));
+    w.appendChild(el("p", "char-line", subN(D.HOME.intro, c.name)));
+    w.appendChild(button("Show her in", renderHomeRooms, "primary"));
+    screen().appendChild(w);
+  }
+  function renderHomeRooms() {
+    renderHud(); clearScreen();
+    const dt = state.date, c = D.CHARACTERS[dt.id], w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `🏠 Home · with ${c.name}`));
+    w.appendChild(el("p", "talk-prompt", `Interest ${composite(dt.id)} · the night's yours. Where to?`));
+    const o = el("div", "choices");
+    D.HOME.rooms.forEach((room, i) => {
+      if (room.key === "bedroom" && !bedroomUnlocked())
+        o.appendChild(button(`${room.name} 🔒`, () => renderResult({ title: "Not tonight", lines: [subN(room.gateFail, c.name)], tone: "neutral", then: renderHomeRooms, thenLabel: "Back" }), "choice subtle"));
+      else o.appendChild(button(room.name, () => renderHomeMenu(i, []), "choice"));
+    });
+    o.appendChild(button("Wind the night down together", renderDateEnd, "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  const homeChildren = (n) => n.actions || n.sub || [];
+  function homeNodeAt(roomIdx, path) {
+    let n = D.HOME.rooms[roomIdx];
+    for (const idx of path) n = homeChildren(n)[idx];
+    return n;
+  }
+  function gateMissing(g) {
+    if (!g) return false;
+    const dt = state.date, id = dt.id;
+    return (g.inti && dt.home.inti < g.inti) || (g.rom && barVal(id, "romance") < g.rom) || (g.lib && barVal(id, "libido") < g.lib);
+  }
+  function renderHomeMenu(roomIdx, path) {
+    renderHud(); clearScreen();
+    const dt = state.date, c = D.CHARACTERS[dt.id];
+    const room = D.HOME.rooms[roomIdx], node = homeNodeAt(roomIdx, path);
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `🏠 ${room.name} · with ${c.name}`));
+    const enter = node.enter || (path.length === 0 ? room.enter : null);
+    if (enter) w.appendChild(el("p", "char-line", subN(enter, c.name)));
+    const o = el("div", "choices");
+    homeChildren(node).forEach((child, i) => {
+      if (child.rooms) return o.appendChild(button("Go somewhere else", renderHomeRooms, "choice subtle"));
+      if (child.back) return o.appendChild(button(child.label || "Back", () => renderHomeMenu(roomIdx, path.slice(0, -1)), "choice subtle"));
+      if (child.sub) return o.appendChild(button(child.label, () => renderHomeMenu(roomIdx, path.concat(i)), "choice"));
+      if (gateMissing(child.gate)) return o.appendChild(button(`${child.label} — she's not there yet`, null, "choice", true));
+      const hot = child.roll && child.roll.win && child.roll.win.kiss;
+      o.appendChild(button(child.label, () => homeResolve(child, roomIdx, path), hot ? "choice move" : "choice"));
+    });
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function homeAccrue(fx) {
+    const dt = state.date, id = dt.id;
+    if (fx.rom) adjustBar(id, "romance", fx.rom);
+    if (fx.aff) adjustBar(id, "affection", fx.aff);
+    if (fx.lib) adjustBar(id, "libido", fx.lib);
+    if (fx.atr) adjustBar(id, "attraction", fx.atr);
+    if (fx.inti) dt.home.inti += fx.inti;
+    if (fx.loosen) dt.home.loosen = true;
+    if (fx.kiss && !state.milestones[id].kiss) { state.milestones[id].kiss = true; adjustBar(id, "attraction", 3); }
+    dt.totRom += fx.rom || 0; dt.totAff += fx.aff || 0;
+    dt.bestQ = Math.max(dt.bestQ, (fx.rom || 0) / 4 + (fx.inti || 0) * 0.4);
+  }
+  function homeRoll(id, dc) {
+    const dt = state.date, mood = moodOf(id);
+    const flav = mood === "hot" ? 3 : mood === "warm" ? 1 : mood === "cold" ? -3 : 0;
+    const gauge = Math.floor(composite(id) / 7) + Math.floor(barVal(id, "romance") / 9) + Math.floor(barVal(id, "libido") / 9) + (dt.home.loosen ? 2 : 0) + flav;
+    const roll = d20(), total = roll + gauge;
+    return { ok: roll !== 1 && (roll === 20 || total >= dc), roll, gauge, total, dc };
+  }
+  function homeResolveNode(node, back) {
+    const dt = state.date, id = dt.id, c = D.CHARACTERS[id];
+    if (node.roll) {
+      const r = homeRoll(id, node.roll.dc), br = r.ok ? node.roll.win : node.roll.lose;
+      const roll = { d20: r.roll, stat: `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
+      if (!r.ok && br.hard) return homeBail(br, roll);
+      homeAccrue(br.fx || {});
+      return renderResult({ title: r.ok ? "She's right there" : "Not quite there", roll, lines: br.lines.map((l) => subN(l, c.name)), tone: r.ok ? "good" : "bad", then: back, thenLabel: "Back" });
+    }
+    homeAccrue(node.fx || {});
+    renderResult({ title: "…", lines: node.lines.map((l) => subN(l, c.name)), tone: "good", then: back, thenLabel: "Back" });
+  }
+  function homeResolve(child, roomIdx, path) {
+    if (child.chance) return homeSwim(roomIdx, path);
+    homeResolveNode(child, () => renderHomeMenu(roomIdx, path));
+  }
+  function homeSwim(roomIdx, path) {
+    const dt = state.date, c = D.CHARACTERS[dt.id], sw = D.HOME.swim;
+    const back = () => renderHomeMenu(roomIdx, path);
+    if (dt.home.swim === null) {
+      const ta = c.traitAffinity;
+      let p = 0.45 + ((ta.classy || 0) - (ta.adventurous || 0)) * 0.07;
+      p = Math.max(0.15, Math.min(0.8, p));
+      dt.home.swim = Math.random() < p ? "suit" : "none";
+    }
+    if (dt.home.swim === "suit") {
+      homeAccrue(sw.hasSuit.fx);
+      return renderResult({ title: "Into the tub", lines: sw.hasSuit.lines.map((l) => subN(l, c.name)), tone: "good", then: back, thenLabel: "Back" });
+    }
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `♨️ The hot tub · with ${c.name}`));
+    w.appendChild(el("p", "char-line", subN(sw.ask, c.name)));
+    const o = el("div", "choices");
+    sw.noSuit.forEach((opt) => o.appendChild(button(opt.label, () => homeResolveNode(opt, back), opt.roll && opt.roll.win && opt.roll.win.kiss ? "choice move" : "choice")));
+    o.appendChild(button("Back to the yard", back, "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function homeBail(br, roll) {
+    const dt = state.date, id = dt.id, c = D.CHARACTERS[id];
+    homeAccrue(br.fx || {});
+    state.milestones[id].dates += 1;
+    const venues = dt.used.map((v) => D.LOCATIONS[v].name).join(" → ");
+    const tot = `Total: Romance ${dt.totRom >= 0 ? "+" : ""}${dt.totRom} · Affection ${dt.totAff >= 0 ? "+" : ""}${dt.totAff} · $${dt.spent} spent.`;
+    state.date = null;
+    renderResult({
+      title: "The night ends early", roll,
+      lines: br.lines.map((l) => subN(l, c.name)).concat([`${venues}.`, tot, "She calls a car. The door closes softer than the mood did."]),
+      tone: "bad", then: () => { state.metCount[id] += 1; advancePhase(); },
     });
   }
 
@@ -756,10 +890,11 @@
     } else {
       const who = one(guests), c = D.CHARACTERS[who];
       const spicy = spicyOK && (barVal(who, "libido") >= 55 || (c.traitAffinity.adventurous || 0) >= 2);
-      const prompt = spicy ? one(D.PARTY.spicyDares) : one(Math.random() < 0.5 ? D.PARTY.truths : D.PARTY.dares);
-      gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, narr.concat([`It's ${c.name}'s turn: "${prompt}"`]), `${c.name} glances at you while she does it. What do you do?`, [
-        ["Egg her on", () => { adjustBar(who, "romance", spicy ? 5 : 3); adjustBar(who, "libido", spicy ? 4 : 1); afterGameRound(`${c.name} goes for it, holding your eyes the whole time. Romance +${spicy ? 5 : 3}.`); }],
-        ["Play it cool", () => { adjustBar(who, "romance", 1); afterGameRound(`You stay unreadable. ${c.name} works a little harder for your reaction. Romance +1.`); }],
+      const beat = one(spicy ? D.PARTY.spicyGuestBeats : D.PARTY.guestBeats).replace(/\{n\}/g, c.name);
+      const others = narr.filter((l) => l.indexOf(c.name) !== 0);
+      gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, others, `${beat}${spicy ? " She glances at you doing it." : ""}  ·  What do you do?`, [
+        ["Cheer her on, loudest in the room", () => { adjustBar(who, "romance", spicy ? 5 : 3); adjustBar(who, "libido", spicy ? 4 : 1); afterGameRound(`You're the loudest one clapping. ${c.name} plays the whole bit straight to you, and makes sure you know it. Romance +${spicy ? 5 : 3}${spicy ? " · Libido +4" : ""}.`); }],
+        ["Stay unreadable", () => { adjustBar(who, "romance", 1); afterGameRound(`You give her absolutely nothing. ${c.name} pushes the bit twice as hard just to crack your face — and clocks, annoyed, that it didn't work. Romance +1.`); }],
       ]);
     }
   }
@@ -767,10 +902,20 @@
     const guests = partyGuests(), focus = guests.length ? one(guests) : null;
     const pool = kind === "truth" ? (spicyOK ? D.PARTY.spicyTruths : D.PARTY.truths) : (spicyOK ? D.PARTY.spicyDares : D.PARTY.dares);
     const prompt = one(pool);
-    const opts = kind === "truth"
-      ? [["Answer honestly", "sincere", true], ["Spin it into a joke", "playful", false], ["Dodge it", "independent", false]]
-      : [["Go all in", "adventurous", true], ["Tame version", "classy", false], ["Chicken out", "__chk", false]];
-    gameShell(`🎲 Your ${kind}`, [], `"${prompt}"`, opts.map(([label, trait, bold]) => [label, () => tdYouResolve(focus, trait, bold)]));
+    let buttons;
+    if (kind === "truth")
+      buttons = [["Answer honestly", () => tdYouResolve(focus, "sincere", true)], ["Spin it into a joke", () => tdYouResolve(focus, "playful", false)], ["Dodge it", () => tdYouResolve(focus, "independent", false)]];
+    else {
+      buttons = [["Go all in", () => tdYouResolve(focus, "adventurous", true)], ["Tame version", () => tdYouResolve(focus, "classy", false)], ["Chicken out", () => tdYouResolve(focus, "__chk", false)]];
+      if (spicyOK && guests.length) buttons.unshift([`💋 ${D.PARTY.kissDare}`, renderPartyKissPick]);
+    }
+    gameShell(`🎲 Your ${kind}`, [], `"${prompt}"`, buttons);
+  }
+  function renderPartyKissPick() {
+    const guests = partyGuests();
+    gameShell("💋 Your dare — your call", [], "The whole circle's watching, counting down. Who do you kiss?",
+      guests.map((id) => [`${D.CHARACTERS[id].emoji} Kiss ${D.CHARACTERS[id].name}`, () => spinKiss(id)])
+        .concat([["Can't choose — forfeit", () => afterGameRound("You stall too long and the moment dies; the circle boos you into the next round. (Forfeit.)", "neutral")]]));
   }
   function tdYouResolve(focusId, trait, bold) {
     if (!focusId) { afterGameRound("You answer to the room in general. Mild chaos, no casualties."); return; }

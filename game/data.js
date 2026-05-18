@@ -220,16 +220,6 @@
           { text: "Tell her something true", trait: "sincere", mag: 3 },
           { text: "Pull her up to dance with no music", trait: "adventurous", mag: 3 },
           { text: "Keep her guessing", trait: "playful", mag: 2 } ] } ] },
-    home: { intro: "Your place. Lower lights, no audience, the night slowing down to just the two of you.",
-      beats: [
-        { q: "She steps in, takes it all in. \"So this is you.\"", opts: [
-          { text: "Cook for her, properly", trait: "generous", mag: 3 },
-          { text: "Put on something you love, explain why", trait: "sincere", mag: 3 },
-          { text: "Pour two glasses, let it breathe", trait: "classy", mag: 3 } ] },
-        { q: "It goes quiet and close. Her eyes haven't left yours.", opts: [
-          { text: "Say exactly what you feel", trait: "sincere", mag: 3 },
-          { text: "Let the moment take over", trait: "adventurous", mag: 3 },
-          { text: "Slow it down on purpose", trait: "classy", mag: 2 } ] } ] },
   };
   // How you close out the night (shown at the end of a date).
   const DATE_END = [
@@ -258,17 +248,84 @@
     spicyDares: ["Kiss the most attractive person in the circle.", "Sit in someone's lap until your next turn.", "Whisper what you'd do later into someone's ear."],
     askTruths: [{ text: "\"Who in here do you actually have a crush on?\"", trait: "adventurous", mag: 3 }, { text: "\"What's something you secretly want?\"", trait: "sincere", mag: 3 }],
     askDares: [{ text: "Dare her to dance with you", trait: "adventurous", mag: 3 }, { text: "Dare her to give her honest first impression of you", trait: "sincere", mag: 2 }],
-    // What other guests do during a game round (narrated even when you're not involved).
+    // The player can pick who to kiss when dared.
+    kissDare: "Kiss someone in the circle — your pick.",
+    // Concrete: what she actually did, and how the room reacts.
     guestBeats: [
-      "{n} takes the dare without blinking and the circle loses it.", "{n} deflects with a joke so smooth nobody notices she dodged.",
-      "{n} answers way too honestly and the room goes \"ooooh.\"", "{n} drags someone else into her turn and makes it their problem.",
-      "{n} rolls her eyes, then does it anyway, grinning.",
+      "{n} downs her drink, stands on the couch, and belts the chorus of a song nobody requested — half the room joins in, the other half films it.",
+      "{n} gets dared to do an impression of the host and nails it so hard he throws a cushion at her while everyone howls.",
+      "{n}'s truth is 'what's your most embarrassing nickname' — she answers, instantly regrets it, and the whole circle starts using it.",
+      "{n} dodges her question with a story about a goat at a wedding; nobody finds out if it was true, but everybody's crying laughing.",
+      "{n} loses a dare and has to wear a lampshade for the round; she commits to it completely, fielding questions like it's a press conference.",
+      "{n} answers 'biggest red flag you ignored' with brutal honesty and the room goes dead quiet, then erupts in sympathetic groaning.",
+      "{n} gets dared to call an ex and chickens out at the last ring, dropping the phone like it bit her — relieved cheering all around.",
+      "{n} takes a dare to swap an item of clothing with the person left of her; they trade jackets and parade it like a runway, to applause.",
     ],
     spicyGuestBeats: [
-      "{n} holds eye contact with you while she answers. On purpose.", "{n}'s dare ends with her in someone's lap, laughing.",
-      "{n} leans in and whispers her answer, and whoever hears it goes red.", "{n} picks the spicy option without hesitating and watches your face.",
+      "{n} gets 'who here would you actually go home with' — she doesn't answer out loud, just looks dead at you for a beat too long. The circle catches it and loses it.",
+      "{n}'s dare is to give someone a thirty-second shoulder rub; she picks the person across from her, and the room starts a slow clap that turns into chaos.",
+      "{n} answers 'last thing you fantasized about' by leaning in and saying it only to the girl beside her, who goes scarlet and refuses to repeat it.",
+      "{n} loses a dare and has to sit in the nearest lap until her next turn — she chooses deliberately, gets comfortable, and runs the rest of the round from there.",
+      "{n} is dared to whisper what she'd do later into someone's ear; whatever she says makes him laugh, then go very quiet, then very pink.",
+      "{n} takes 'kiss the most attractive person in the circle,' scans the room slowly to draw it out, and plants a quick one on whoever she's decided is the safest scandal.",
+      "{n}'s truth is 'who's the best kisser you know' — she answers with a name, won't elaborate, and sips her drink while the interrogation fails.",
+      "{n} gets dared to slow-dance with someone for a full minute with no music; she makes it weirdly tender and the room doesn't know whether to laugh or look away.",
     ],
     privateGateFlow: 2, privateGateInterest: 45,
+  };
+
+  // Deep, explorable home date. Rooms → activities → intimate sub-actions.
+  // {n} = her name. recept rolls read her composite/romance/libido + mood.
+  const HOME = {
+    intro: "Your door clicks shut behind you both. The city noise drops away. It's just your place, the lamps low, and {n} — and the whole rest of the night with nothing scheduled in it.",
+    bedroomGate: { inti: 6, rom: 45 },
+    rooms: [
+      { key: "living", name: "Living room", enter: "The lamp light is warm. {n} kicks her shoes off by the door without being told to, which says something.",
+        actions: [
+          { label: "Sit on the couch with her", enter: "She folds onto the couch, tucks her feet up, and there's a clear, deliberate amount of space left beside her.", sub: [
+            { label: "Just talk, shoulder to shoulder", fx: { rom: 4, aff: 6, inti: 1 }, lines: ["You sink in next to her and the conversation goes somewhere real — the kind you don't have standing up. {n} turns to face you, knee against yours, in no hurry to be anywhere."] },
+            { label: "Run your fingers through her hair", fx: { rom: 6, lib: 3, inti: 2 }, lines: ["You tuck a loose strand back and let your hand stay, fingers slow through her hair. {n}'s eyes half-close; she leans into your palm like a cat and doesn't pretend otherwise."] },
+            { label: "Massage her shoulders", roll: { dc: 11, win: { fx: { rom: 7, lib: 6, inti: 2 }, lines: ["You work the knots out of her shoulders and she actually groans, melting back against you. \"Okay,\" {n} murmurs, \"you're not allowed to stop now.\""] }, lose: { fx: { rom: -2, aff: -1 }, lines: ["She tenses instead of softening. \"Mm — I'm okay, actually.\" You ease off; not the moment for it."] } } },
+            { label: "Pull her in and kiss her", roll: { dc: 13, win: { fx: { rom: 11, lib: 8, inti: 3 }, kiss: true, lines: ["You close the gap. {n} meets you halfway and then some — a hand fisting your shirt, the couch forgotten. It goes from soft to unhurried-but-certain, and neither of you is in a rush to come up for air."] }, lose: { fx: { rom: -7, aff: -4 }, lines: ["You lean in and she puts two fingers gently on your chest. \"Hey. Slow down — I'm enjoying this, I just want to get there, not skip there.\" Fair, and it stings a little."] } } },
+            { label: "Back up", back: true },
+          ] },
+          { label: "Put music on and pull her up to dance", roll: { dc: 12, win: { fx: { rom: 9, lib: 5, inti: 2 }, lines: ["You find something slow and hold a hand out. {n} rolls her eyes, takes it anyway, and then stops performing the eye-roll about thirty seconds in — one hand sliding to the back of your neck, both of you barely moving in the middle of your own living room."] }, lose: { fx: { rom: 1 }, lines: ["She laughs you off — \"absolutely not, I've seen you move\" — and stays on the couch. Worth a shot."] } } },
+          { label: "Put something on TV and half-watch it", fx: { rom: 5, aff: 3, inti: 1 }, lines: ["You put on something neither of you intends to follow. Within ten minutes she's sideways against you, narrating it badly on purpose, your arm around her like it lives there."] },
+          { label: "Go somewhere else", rooms: true },
+        ] },
+      { key: "kitchen", name: "Kitchen", enter: "The kitchen's all low light and counter space. {n} hops up to sit on the counter like she owns it.",
+        actions: [
+          { label: "Cook something together", fx: { rom: 5, aff: 7, inti: 1 }, lines: ["You actually cook — her on prep, you on heat, a real amount of bickering about salt. It comes out good. Eating it standing up at the counter at this hour feels better than any restaurant did."] },
+          { label: "Open a bottle and let it breathe", fx: { rom: 5, lib: 5, inti: 1, loosen: true }, lines: ["You pour two glasses of something decent. {n} swirls hers, watches you over the rim, and the whole room drops half a gear looser."] },
+          { label: "Stand between her knees and talk close", roll: { dc: 12, win: { fx: { rom: 8, lib: 6, inti: 3 }, lines: ["You step in where the counter put her exactly at your height. {n} doesn't move her knees apart for show — she just doesn't close them, and the conversation gets very quiet and very specific about nothing."] }, lose: { fx: { rom: -3, aff: -2 }, lines: ["She slides off the counter with a light \"easy, tiger\" and puts the island between you, smiling but resetting the pace."] } } },
+          { label: "Steal a kiss while she's mid-sentence", roll: { dc: 13, win: { fx: { rom: 10, lib: 7, inti: 3 }, kiss: true, lines: ["She's complaining about something and you just lean in and kiss her mid-word. {n} makes an indignant sound that lasts about half a second before her hands are in your hair and the sentence is permanently unfinished."] }, lose: { fx: { rom: -6, aff: -3 }, lines: ["You go for it and mistime it badly; she turns her head and your mouth lands on her cheek. \"Smooth,\" she says, kind but not melting. Recoverable. Barely."] } } },
+          { label: "Go somewhere else", rooms: true },
+        ] },
+      { key: "yard", name: "Back yard", enter: "Out back it's cooler and darker, the sky doing more than the city usually lets it.",
+        actions: [
+          { label: "Lie back and look at the stars", fx: { rom: 6, aff: 5, inti: 1 }, lines: ["You both lie back on the cool grass. {n} finds your hand without looking and the talk goes low and honest the way it only does when nobody has to make eye contact."] },
+          { label: "Light a fire and sit close", fx: { rom: 7, lib: 3, inti: 2 }, lines: ["You get a small fire going. {n} migrates into your side for the warmth — allegedly — and stays there long after the chill stops being an excuse."] },
+          { label: "Get in the hot tub", chance: true },
+          { label: "Go somewhere else", rooms: true },
+        ] },
+      { key: "bedroom", name: "Bedroom", gateFail: "You glance toward the bedroom. {n} clocks it, and gently doesn't follow your eyes. Not tonight — she's not there with you yet. The door stays shut.",
+        enter: "You end up in the doorway of the bedroom together and the air changes — quieter, slower, every small sound suddenly loud. {n} steps in first and turns to look at you.",
+        actions: [
+          { label: "Lie down together, just close", fx: { rom: 10, aff: 8, lib: 4, inti: 3 }, lines: ["You don't rush anything. You lie down facing her, fully clothed, the lamp still on, and just be close — her fingertips tracing idle lines on your arm, talking in near-whispers about nothing important. It's almost unbearably good, and it isn't even the point."] },
+          { label: "Undress the moment slowly — kiss her there", roll: { dc: 14, win: { fx: { rom: 14, lib: 12, inti: 4 }, kiss: true, lines: ["You kiss her standing at the foot of the bed and let it build with no hurry at all — every layer of distance peeled back one at a time, her breath catching against your mouth, her hands deciding things before she says them. By the time you ease down onto the bed there's nothing tentative left in it."] }, lose: { hard: true, fx: { rom: -10, aff: -6 }, lines: ["You move too fast for where she actually is. {n} catches your hands and holds them still. \"I want to — I do — just not tonight, not like this.\" She means it kindly, and she means it. The night doesn't recover from here, and you both quietly know it."] } } },
+          { label: "Take it all the way", gate: { inti: 9, rom: 60 }, roll: { dc: 15, win: { fx: { rom: 18, lib: 16, inti: 5 }, kiss: true, lines: ["There's a last look — the one that's actually a question — and {n} answers it by pulling you down with her. After that it's unhurried and certain and entirely mutual: the lamp off, the rest of it hers and yours and no one else's. Later she's tucked into you in the dark, tracing your collarbone, half-asleep and not going anywhere.", "Some of the night stays exactly where it happened."] }, lose: { hard: true, fx: { rom: -12, aff: -7 }, lines: ["You reach for more than the moment is holding. {n} stops you — fully, gently, not unkindly. \"Hey. Not tonight.\" She sits up, fixes her shirt, and the warmth goes out of the room like a door opened on winter. The night's over, and it didn't end the way you wanted."] } } },
+          { label: "Step back out", rooms: true },
+        ] },
+    ],
+    swim: {
+      ask: "The tub's hot and the night's quiet. {n} dips a hand in, then looks at you with the specific problem written on her face: nobody packed for this.",
+      hasSuit: { lines: ["Turns out {n} came prepared — a swimsuit under the dress, because of course she had a feeling. She changes and slides in across from you, grinning at how smug she gets to be about it."], fx: { rom: 6, lib: 5, inti: 2 } },
+      noSuit: [
+        { label: "\"We don't have to — let's just sit by it.\"", fx: { rom: 4, aff: 5, inti: 1 }, lines: ["You wave it off and you both just sit on the edge, feet in, leaning into each other. Easy. She seems to like that you offered the out."] },
+        { label: "\"Underwear's basically a swimsuit.\"", roll: { dc: 12, win: { fx: { rom: 9, lib: 9, inti: 3 }, lines: ["{n} considers you, then the water, then shrugs — \"it absolutely is not, but fine\" — and is down to it before you've finished agreeing. The water's hot, the space between you isn't, and nobody mentions the technicality again."] }, lose: { fx: { rom: -3, aff: -2 }, lines: ["\"Nice try.\" She laughs but keeps her dress firmly on, dangling her feet in instead. Pace check, noted."] } } },
+        { label: "\"…or we skip the swimwear entirely.\"", roll: { dc: 15, win: { fx: { rom: 13, lib: 14, inti: 4 }, kiss: true, lines: ["You say it like a dare and {n} holds your eyes while she calls it — no hesitation in the end, just a slow smile and a quiet \"turn the porch light off, then.\" The water's dark and warm and very close, and the rest of it belongs to the two of you."] }, lose: { hard: true, fx: { rom: -9, aff: -6 }, lines: ["It lands wrong. {n}'s smile flattens. \"Okay — that's a lot faster than I'm going.\" She pulls her feet out and reaches for her shoes, and the air's gone out of the night."] } } },
+      ],
+    },
   };
 
   const STAGES = [
@@ -305,6 +362,6 @@
   window.GAMEDATA = {
     STATS, STAT_LABEL, STAT_SHORT, BARS, BAR_LABEL, BAR_SHORT, TRAITS,
     BACKGROUNDS, SAYS, MOVE, LINES, ITEMS, SHOPS, LOCATIONS, PHASES,
-    CHARACTERS, BILL, DATE_SCENES, DATE_END, PARTY, STAGES, TUNING,
+    CHARACTERS, BILL, DATE_SCENES, DATE_END, HOME, PARTY, STAGES, TUNING,
   };
 })();
