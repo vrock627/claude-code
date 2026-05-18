@@ -231,7 +231,7 @@
   ];
 
   const PARTY = {
-    rounds: 6, guestsMin: 2, guestsMax: 3, gameRounds: 3,
+    rounds: 6, guestsMin: 2, guestsMax: 3, gameRounds: 3, tdRounds: 6,
     // flow stage by (rounds elapsed + drinks + heat from spicy beats); pick highest whose `at` <= level
     flows: [
       { at: 0, name: "warming up", desc: "Still arriving, but this one's loud early — it's already got a charge to it." },
@@ -343,6 +343,19 @@
       ],
       win: ["The party keeps going without either of you for a while.", "Some of tonight is staying in this room."],
     },
+    // Dares the player can hand out to a guest. Tiered like everything else.
+    makeDares: {
+      plain: ["do their worst dance move, right now", "do a dramatic reading of the last text they sent", "let the circle restyle their hair", "talk in an accent until their next turn"],
+      spicy: ["sit in your lap until their next turn", "give someone in the circle a thirty-second shoulder rub", "whisper the last thing they fantasized about to the person on their left", "kiss the most attractive person in the circle", "lose one item of clothing — your call"],
+      scorch: ["two minutes in the hall with whoever you pick", "demonstrate their single best move on a willing volunteer", "tell the hottest person here exactly what they noticed about them, to their face", "lose a layer, then run the next round from someone's lap"],
+    },
+    // Both of you naked + a get-handsy dance that lands → the floor stops
+    // being a metaphor. Routes into the same protection/finish beat.
+    floorSex: {
+      ask: "There is, very literally, nothing left in the way — no clothes, no pretense, the dance having quietly stopped being a dance a minute ago. {n}'s mouth is at your ear over the bass: \"…nobody's even looking anymore. Your call.\" She's not wrong, and she's not waiting much longer for the answer.",
+      win: ["The crowd has folded back into its own noise; the dark and the bass do the rest. Right here, on the floor, with the party going on stupid and oblivious around you both, is exactly where it happens, and neither of you decides to be discreet about it.", "Some of this particular party is never getting described to anyone."],
+      headOut: "Find your clothes — eventually",
+    },
     privateGateFlow: 1, privateGateInterest: 40,
   };
 
@@ -351,42 +364,44 @@
   // the party slip-away.
   const INTIMACY = {
     beats: [
-      { q: "How does it go?", opts: [
-        { label: "Slow. Unhurried. Make it last.", fx: { rom: 8, aff: 6, inti: 1 }, line: "You take it slow enough that every part of it registers — her breath, the pauses, the way she keeps saying your name like she's checking you're still there." },
-        { label: "Urgent — neither of you can wait.", fx: { lib: 10, atr: 5, rom: 4 }, line: "It's all heat and no patience: a mess of half-removed everything, one shared laugh, and then very much not laughing." },
-        { label: "Let her set the pace entirely.", fx: { rom: 7, aff: 7, lib: 3 }, line: "You hand her the tempo and she takes it with a certainty that quietly rearranges a few of your assumptions about her." } ] },
-      { q: "Who's running this?", opts: [
-        { label: "Take the lead.", fx: { atr: 6, lib: 6, rom: 3 }, line: "You take charge; she lets you, watching your face the whole time like she's filing every second of it away." },
-        { label: "Let her take over.", fx: { rom: 6, lib: 7, aff: 3 }, line: "You give it up to her and she does not hesitate to take it. It is not a thing you'll be forgetting." },
-        { label: "Trade it back and forth.", fx: { rom: 7, aff: 5, lib: 4 }, line: "It keeps changing hands — a push, an answer, a quiet contest neither of you is actually trying to win." } ] },
-      { q: "And underneath all of it —", opts: [
-        { label: "Keep it tender. Stay close.", fx: { rom: 9, aff: 8 }, line: "You keep your forehead to hers and it stays unbearably close the whole way through — more sincere than you meant to be, and not sorry about it." },
-        { label: "Let it get intense.", fx: { lib: 9, atr: 7, rom: 3 }, line: "It stops being careful somewhere in the middle, and neither of you is performing a single thing by the end." },
-        { label: "Make her laugh, then mean it.", fx: { aff: 8, rom: 6, lib: 3 }, line: "You crack a joke at precisely the wrong moment; she laughs, swats you, and then the laugh turns into something with no jokes left in it at all." } ] },
+      { q: "How does it start?", opts: [
+        { label: "Slow. Unhurried. Make her wait for it.", fx: { rom: 8, aff: 6, inti: 1 }, line: "You take it slow on purpose — slow enough that everything has time to land. The drag of your mouth down the side of her throat. The way her breath catches and then deliberately steadies, like she's trying to keep some composure and losing. Her fingers spread flat on your back and press, asking for more without saying it, and you don't give it to her yet. She says your name once, low, half a complaint. You feel her give up the last of the patience somewhere against your collarbone." },
+        { label: "Urgent — neither of you can wait.", fx: { lib: 10, atr: 5, rom: 4 }, line: "There's nothing careful about it. It's hands and mouths and too many clothes in the way and one of you laughing breathlessly at the logistics before the laugh turns into something with no humor left in it. She pulls you down by the front of your shirt like she's been waiting all night to stop being polite about this — and she has — and after that neither of you is being polite about anything." },
+        { label: "Let her set the pace entirely.", fx: { rom: 7, aff: 7, lib: 3 }, line: "You go still and let her have it, and she takes it without a flicker of hesitation — pushes you back, settles her weight over you, sets the rhythm slow and certain and entirely her own. She watches your face the whole time she does it, reading every reaction, adjusting, unhurried, in complete command of the room and clearly enjoying that you noticed." } ] },
+      { q: "And then —", opts: [
+        { label: "Take the lead. Pin it down.", fx: { atr: 6, lib: 6, rom: 3 }, line: "You take over and she lets you, her wrists going easy under your hands, her hips arching up to meet you on the first beat like she'd already decided how this part went. She keeps her eyes open. She wants to watch you do this. Every sound she makes is involuntary and she stops trying to hide that they are." },
+        { label: "Let her take over completely.", fx: { rom: 6, lib: 7, aff: 3 }, line: "You give it up to her and she does not hesitate to take it — both hands flat on your chest, her weight pinning you exactly where she wants you, setting a pace that has you saying things you don't fully plan to. She likes that. You can feel her like it, the smile against your jaw, the way she leans into every reaction she pulls out of you." },
+        { label: "Trade it back and forth.", fx: { rom: 7, aff: 5, lib: 4 }, line: "It keeps changing hands — you take it, she takes it back, a roll and a pin and a low laugh that gets cut off. Neither of you is actually trying to win the quiet contest of it; you're just both refusing to be the one who's only along for the ride, and the friction of that is most of the point." } ] },
+      { q: "In the middle of all of it —", opts: [
+        { label: "Keep it close. Foreheads together.", fx: { rom: 9, aff: 8 }, line: "You slow it right down to almost nothing, your forehead dropped to hers, every breath shared in the inch between you. It gets unbearably intimate — eye contact she doesn't break, your name said like it means something specific, her hand coming up to hold the side of your face like she needs you to not look away. More sincere than either of you meant to be tonight, and neither of you backs off it." },
+        { label: "Let it get loud.", fx: { lib: 9, atr: 7, rom: 3 }, line: "It stops being careful somewhere in the middle and stays there — her nails, your name bitten off against her shoulder, the headboard and neither of you caring, every performance she walked in wearing gone completely. By the end there is nothing left of the version of her that has a public face. Just this one. You're keeping that." },
+        { label: "Make her laugh, then ruin the joke.", fx: { aff: 8, rom: 6, lib: 3 }, line: "You say something stupid at exactly the wrong moment and she laughs — a real one, surprised out of her — and swats your shoulder, and then the laugh changes register without fully stopping, goes ragged, becomes a sound that is not about anything funny at all. She keeps her face hidden in your neck after that, like the laugh embarrassed her less than what replaced it." } ] },
+      { q: "When it crests —", opts: [
+        { label: "Drag it out. Don't let her get there yet.", fx: { rom: 8, lib: 9, atr: 4 }, line: "You feel her get close and you back off the edge of it, on purpose, and she makes a sound that is mostly outrage and entirely the opposite of stop. You do it again. The third time she gets a fist in your hair and a threat half-formed against your mouth, and you finally stop being cruel about it, and what happens then is loud and undignified and worth every second of the wait." },
+        { label: "Take her over with you.", fx: { lib: 10, rom: 7, aff: 3 }, line: "You stop holding any of it back and so does she, and it goes over the edge together — her grip locking, her face pressed hard into the side of your neck, both of you saying nothing coherent, the whole world narrowed to a few seconds that neither of you will be describing to anyone, ever, and will both be thinking about for a while." },
+        { label: "Her first. Watch.", fx: { rom: 9, aff: 7, lib: 6 }, line: "You take your time and make it about her, and when it finally takes her you're watching — that's the point, you wanted to see it — the exact moment her composure goes, the arch and the held breath and the way she says your name like an accusation. She catches you watching, after, still wrecked, and laughs at you for it, breathless, and pulls you down anyway." } ] },
     ],
     close: { q: "After —", opts: [
-      { label: "Stay tangled up, talk till it's late.", fx: { rom: 10, aff: 10 }, line: "Neither of you sleeps for a while. You just talk in the dark — the good kind, the kind that's its own entire thing.", tone: "good" },
-      { label: "Both of you pass out instantly.", fx: { aff: 6, rom: 4 }, line: "You get about ninety seconds of intending to talk before you're both gone, her hand still flat on your chest.", tone: "good" },
-      { label: "She slips out before dawn.", fx: { atr: 4, rom: -3 }, line: "You wake to a cold half of the bed and a note: a phone number you already have, and a drawn smirk. Infuriating. Effective.", tone: "neutral" } ] },
-    // Only shown when it was unprotected. Non-graphic; "finish inside"
-    // gates a real pregnancy-risk consequence.
+      { label: "Stay tangled up, talk till it's late.", fx: { rom: 10, aff: 10 }, line: "Neither of you sleeps for a long time. You stay exactly where you ended up, sweat cooling, her leg hooked over yours, and just talk — quiet, unguarded, the kind of conversation that only happens at this specific hour with this specific person and a ceiling to look at. She traces shapes on your chest and tells you a true thing she wouldn't have told you with the lights on.", tone: "good" },
+      { label: "Both of you pass out instantly.", fx: { aff: 6, rom: 4 }, line: "You get about ninety seconds of intending to debrief before you're both gone — her face mashed into your shoulder, one hand still flat over your heartbeat like she fell asleep mid-thought checking it was still doing that.", tone: "good" },
+      { label: "She slips out before dawn.", fx: { atr: 4, rom: -3 }, line: "You surface to a cold half of the bed, the sheet still holding the shape of her, and a note on the pillow: a number you already have and a drawn smirk. Infuriating. Effective. You're already wondering when you get to do that again, which is, you suspect, the entire point of the note.", tone: "neutral" } ] },
+    // Only shown when it was unprotected. "Finish inside" gates a real
+    // pregnancy-risk consequence.
     finish: {
       q: "Right at the edge —",
-      pull: { label: "Pull out", fx: { rom: 2, aff: 3 }, line: "You pull back at the last second. {n} lets out a breath and a small laugh, foreheads together. \"…good call,\" she manages." },
-      inside: { label: "Finish inside", fx: { rom: 6, lib: 4 }, line: "Neither of you stops, or wants to. After, she stays exactly where she is for a long minute, not saying the obvious thing — and neither do you." },
+      pull: { label: "Pull out", fx: { rom: 2, aff: 3 }, line: "You pull back at the last second, jaw tight, and finish against the curve of her hip with her hand fisted in the sheet and her forehead pressed to your temple, both of you breathing like you ran somewhere. \"…good call,\" she manages, eventually, a little wrecked, a little laughing. Neither of you moves for a while." },
+      inside: { label: "Stay. Finish inside.", fx: { rom: 6, lib: 4 }, line: "Neither of you stops, or wants to, and you feel her decide that at the same moment you do — her legs locking you in, the unspoken thing very loud in the quiet right after. She keeps you there a long minute, heartbeat slamming against yours, not saying the obvious. Neither do you. Both of you are thinking it." },
     },
     // Protection beat for party hookups (home has its own HOME.sex).
-    // Mirrors the home choice: a condom if you brought one, going without
-    // (real risk), or pulling back. Reached after the hookup read succeeds.
     party: {
-      ask: "It's about to be a lot more than a closed door. {n}'s hands still for half a second — not stopping, just one honest beat before this goes all the way.",
-      condom: { lines: ["You've got one on you; she clocks it and the half-second of held breath goes out of her. After that there's nothing careful left, just the bassline through the wall and the two of you and none of the party.", "Some of tonight stays in this room."], fx: { rom: 14, lib: 14, inti: 4, kiss: true } },
-      raw: { lines: ["She doesn't reach for anything and neither do you, and the look you trade about that is its own short conversation, answered fast. After, she's still against you in the dark, the party a dull pulse somewhere far off.", "Some of tonight stays in this room."], fx: { rom: 16, lib: 16, inti: 5, kiss: true } },
-      back: { fx: { rom: 2, aff: 3 }, lines: ["You ease it back down to just this — her forehead on your jaw, both of you breathing, the party stupid and loud and far away. \"…probably smart,\" she admits, not moving."] },
+      ask: "It's about to be a great deal more than a closed door. {n} has you backed against it, her mouth at your jaw, her hands already deciding things — and then they still, for one honest second, the only pause either of you is going to take. The question's in it. She's waiting to see how you answer.",
+      condom: { lines: ["You've got one on you and she watches you produce it and the held breath goes out of her all at once — that specific ease that only comes from not having had to ask. After that there is nothing careful left in any of it. The bassline comes through the wall and the door takes most of your weight and she's got a fistful of your shirt and her mouth at your ear telling you exactly what she wants, and the party stops existing for as long as you let it. It goes on a while. Neither of you is in a hurry to be anywhere this isn't."], fx: { rom: 14, lib: 14, inti: 4, kiss: true } },
+      raw: { lines: ["Neither of you reaches for anything, and the look you trade about that is its own short conversation, asked and answered in about a second. After that it's skin and the wall and her breath going uneven against your throat and the muffled thud of a party that has nothing to do with this room. She doesn't keep quiet. She doesn't try to. By the end she's boneless against you in the dark, mouth still at your jaw, in no state and no hurry to go back out there."], fx: { rom: 16, lib: 16, inti: 5, kiss: true } },
+      back: { fx: { rom: 2, aff: 3 }, lines: ["You ease it back down to just this — her forehead dropped to your jaw, both of you breathing hard against a door, the party stupid and loud and very far away on the other side of it. \"…probably smart,\" she admits, not moving, clearly not entirely meaning it."] },
     },
     // Days later, if it caught.
     pregnancy: {
-      wait: "A few quiet days. Then {n} asks to meet somewhere with nobody else around — and you read it on her face before she gets a word out.",
+      wait: "A few quiet days. Then {n} asks to meet somewhere with nobody else around — and you read it on her face before she gets a single word out.",
       react: {
         warm: "She's scared and working very hard not to let you see how much.",
         cool: "She's calm in the specific way that means the exact opposite of calm.",
@@ -419,19 +434,14 @@
               { label: "Back up", back: true },
             ] },
             { label: "Pull her in and kiss her", roll: { dc: 13, win: { fx: { rom: 11, lib: 8, inti: 3 }, kiss: true, lines: ["You close the gap. {n} meets you halfway and then some — a hand fisting your shirt, the couch forgotten. It goes from soft to unhurried-but-certain, and neither of you is in a rush to come up for air."] }, lose: { fx: { rom: -7, aff: -4 }, lines: ["You lean in and she puts two fingers gently on your chest. \"Hey. Slow down — I'm enjoying this, I just want to get there, not skip there.\" Fair, and it stings a little."] } } },
-            { label: "Start undressing her", gate: { inti: 5, rom: 45 }, enter: "It's gone quiet and close, her eyes dark and certain. She's not stopping you.", sub: [
-              { label: "Slip her shirt off", roll: { dc: 14, into: true, win: { fx: { rom: 8, lib: 9, inti: 3, un: "shirt" }, lines: ["She lifts her arms for you without a word. The shirt goes somewhere neither of you will look for later."] }, lose: { fx: { rom: -6, aff: -4 }, lines: ["She covers your hands with hers. \"Not — not yet, okay?\" You stop instantly, and she softens that you did."] } }, sub: [
-                { label: "Unclasp her bra", roll: { dc: 15, into: true, win: { fx: { rom: 10, lib: 12, inti: 4, un: "bra" }, lines: ["One hand, the clasp, a slow breath out of her as it gives. She watches your face the whole time, daring you to make it weird. You don't."] }, lose: { fx: { rom: -7, aff: -5 }, lines: ["Your hands fumble and she stills them, gently. \"Slow down. We've got all night.\" Soft, but a no for now."] } }, sub: [
-                  { label: "Kiss down her chest", roll: { dc: 15, win: { fx: { rom: 13, lib: 15, inti: 5 }, kiss: true, lines: ["You kiss a slow line down and she lets her head fall back, one hand fisting in your hair, the other gripping the couch like the room moved."] }, lose: { fx: { rom: -6, aff: -4 }, lines: ["She tenses under your mouth; you feel it and stop at once. \"Sorry — I just need to slow this down.\""] } } },
-                  { label: "Undo her jeans", roll: { dc: 16, into: true, win: { fx: { rom: 12, lib: 14, inti: 5, un: "pants" }, lines: ["Button, zip, the slow drag of denim — she lifts her hips to help, and that small motion says more than any of the talking did."] }, lose: { fx: { rom: -7, aff: -5 }, lines: ["She closes her hand over yours at the button. \"That's the line for tonight.\" Kindly. Fully."] } }, sub: [
-                    { label: "Slide her underwear down", gate: { inti: 9, rom: 60 }, roll: { dc: 16, win: { sex: true }, lose: { fx: { rom: -6, aff: -4 }, lines: ["So close, and she catches your hand. \"Wait — come here first.\" Not no. Just not like that, not rushed."] } } },
-                    { label: "Back up", back: true },
-                  ] },
-                  { label: "Back up", back: true },
-                ] },
-                { label: "Back up", back: true },
-              ] },
-              { label: "Back up", back: true },
+            { label: "Start undressing her", ustep: "begin", gate: { inti: 5, rom: 45 }, enter: "It goes quiet and close, her eyes dark and certain on yours, her chin tipping up. She's not stopping you — she's waiting on you, which is worse, in the best way. Whatever you do here you can stop at any layer; nothing here has to be all of it.", sub: [
+              { label: "Slip her shirt up and off", ustep: "shirt", roll: { dc: 14, win: { fx: { rom: 8, lib: 9, inti: 3, un: "shirt" }, lines: ["She lifts her arms for you without being asked and lets you draw it up slow, the hem dragging, her watching your face the whole way like she's grading it. It comes off and gets dropped somewhere neither of you will think about again tonight. She doesn't reach to cover anything. She just looks at you looking, and lets you."] }, lose: { fx: { rom: -6, aff: -4 }, lines: ["She covers your hands with hers, gentle. \"Not — not yet, okay?\" You stop the instant she says it, and you watch her notice that you stopped that fast, and soften."] } } },
+              { label: "Unclasp her bra", ustep: "bra", roll: { dc: 15, win: { fx: { rom: 10, lib: 12, inti: 4, un: "bra" }, lines: ["One hand, the clasp, the slow breath she lets out as it gives and you ease it off her shoulders and away. She watches your face do whatever it does about that, daring you to make it weird, and you don't — you just kiss the bare curve of her shoulder where the strap was, and feel the dare go out of her."] }, lose: { fx: { rom: -7, aff: -5 }, lines: ["Your hands fumble it and she covers them, stilling it, kind about it. \"Slow down. We've got all night.\" Soft. A no, for now, and a promise about later."] } } },
+              { label: "Kiss your way down her chest", ustep: "chest", roll: { dc: 15, win: { fx: { rom: 13, lib: 15, inti: 5 }, kiss: true, lines: ["You put your mouth to her sternum and work down slow, unhurried, paying attention to what changes her breathing and then doing more of that. Her head goes back, one hand fisting in your hair, the other gripping the couch cushion like the floor tilted. She says your name like it got away from her."] }, lose: { fx: { rom: -6, aff: -4 }, lines: ["She tenses under your mouth and you feel it land and you stop at once, lifting off her. \"Sorry — I just. Slower. Stay up here a minute.\" You do."] } } },
+              { label: "Undo her jeans, ease them off", ustep: "pants", roll: { dc: 16, win: { fx: { rom: 12, lib: 14, inti: 5, un: "pants" }, lines: ["Button, then the slow drag of the zip with her watching you do it, then the longer slower drag of getting them down — and she lifts her hips for you without being asked, that one small cooperative motion saying more than the entire evening of talking did. They go off the end of the couch. She does not reach for the blanket."] }, lose: { fx: { rom: -7, aff: -5 }, lines: ["She closes her hand over yours at the button, firm. \"That's the line for tonight.\" Kindly. Completely. You take your hand back and she keeps it."] } } },
+              { label: "Take the last of it off — all the way", ustep: "rest", gate: { inti: 9, rom: 60 }, roll: { dc: 16, win: { sex: true }, lose: { fx: { rom: -6, aff: -4 }, lines: ["You hook the last of it and she catches your wrist — not a no, exactly. \"Wait. Come here first.\" She pulls you up to her mouth instead. Not like that, not rushed. Not yet."] } } },
+              { label: "Leave it here — go somewhere else", rooms: true },
+              { label: "Stop undressing her, stay on the couch", back: true },
             ] },
             { label: "Back up", back: true },
           ] },
@@ -546,14 +556,14 @@
     // Reached from any "all the way" beat. Condom needs one in your bag;
     // going raw is a real read of who she is.
     sex: {
-      ask: "Everything narrows to right here. {n}'s breath is uneven against your jaw; her hand finds the back of your neck and stays. There's one small, honest beat left to get right.",
-      condom: { lines: ["You reach for it; she watches you do it and something in her shoulders lets go — the kind of easy that only comes from not having to ask. After that there's nothing careful left in it, just the two of you and the lamp off and the rest of the night going exactly where it was always going.", "Some of it stays where it happened."], fx: { rom: 18, lib: 16, inti: 5, kiss: true } },
+      ask: "Everything narrows to right here — the lamp off, the city a long way down, {n}'s breath uneven against your jaw and her hand fisted in the back of your collar like she's not planning to let go of it. There's one honest beat left before this goes all the way, and she's holding still through it, waiting to see how you take it.",
+      condom: { lines: ["You reach for it and she watches you do it and the last of the tension goes out of her shoulders all at once — that specific ease that only comes from not having had to ask for it. After that there is nothing careful left. It's slow and then not, her mouth at your throat and then her teeth, your name said into the dark like it's the only word she's kept. It goes on a long time and neither of you wastes a second of it being shy about what you want.", "Later she's tucked into the dark along the length of you, tracing your collarbone with one idle finger, not asleep, not talking, not going anywhere."], fx: { rom: 18, lib: 16, inti: 5, kiss: true } },
       raw: {
         dc: 14,
-        win: { lines: ["She holds your eyes for the question and answers it by pulling you the rest of the way down. It's unhurried and certain and entirely, mutually meant — trust doing half the work the want started. Later she's tucked into the dark against you, tracing your collarbone, not going anywhere.", "Some of it stays where it happened."], fx: { rom: 20, lib: 18, inti: 6, kiss: true } },
-        lose: { hard: true, fx: { rom: -11, aff: -7 }, lines: ["She stops your hand flat. \"No — not like that. Not without.\" It's not anger, it's a line, and you went over it. The warmth leaves the room all at once, and the night with it."] },
+        win: { lines: ["She holds your eyes for the unasked question and answers it by pulling you the rest of the way down with her, both hands, no hesitation in any of it. It's unhurried and then it absolutely isn't — entirely, mutually meant, trust doing half the work the want started and neither of you bothering to be quiet about the rest. She gets a hand in your hair and her mouth at your ear and tells you, specifically, and you listen.", "Later she's folded into the dark against you, sweat cooling, her finger drawing slow nothing on your chest, in no state and no hurry to be anywhere that isn't this."], fx: { rom: 20, lib: 18, inti: 6, kiss: true } },
+        lose: { hard: true, fx: { rom: -11, aff: -7 }, lines: ["She stops your hand flat. \"No — not like that. Not without.\" It's not anger, it's a line, and you went over it. The warmth goes out of the room all at once, and the night with it."] },
       },
-      back: { fx: { rom: 2, aff: 3 }, lines: ["You ease off, forehead to hers, and just breathe for a second. {n} exhales a little laugh — half relief, half something rawer — and pulls you down to just hold her instead. Not nothing. Not tonight, the rest of it."] },
+      back: { fx: { rom: 2, aff: 3 }, lines: ["You ease off, forehead dropped to hers, and just breathe for a second in the inch of space between you. {n} lets out a small laugh — half relief, half something a lot rawer — and pulls you down to just hold her instead, hard, like that's its own thing. It is. Not nothing. Just not the rest of it, not tonight."] },
     },
   };
 
@@ -628,10 +638,10 @@
     ],
     sex: {
       ask: "It narrows down to just the fogged-in dark of the car and the sound of both of you breathing. {n}'s hand is fisted in your collar and not letting go. One honest beat left before this goes all the way.",
-      condom: { lines: ["You've got one; she watches you have it and the last bit of held breath goes out of her — the easy that only comes from not having to ask. After that the city's gone behind the fog and there's just the two of you and a car that was definitely not designed for this and neither of you caring.", "The overlook keeps its own counsel about the rest."], fx: { rom: 17, lib: 16, inti: 5, kiss: true } },
+      condom: { lines: ["You've got one and she watches you have it and the last of the held breath goes out of her — the ease that only comes from not having had to ask. After that the city's gone behind the fog on the glass and there is just the two of you and a back seat that was very much not designed for any of this and neither of you caring even slightly. It's cramped and graceless and she's laughing into your mouth about it right up until she very much isn't, and then it's none of those things, just close and certain and going on longer than the geometry should allow.", "After, she's folded against you in a space far too small for two people, fogging the last clear inch of window, not complaining about a single part of it."], fx: { rom: 17, lib: 16, inti: 5, kiss: true } },
       raw: {
         dc: 14,
-        win: { lines: ["She holds your eyes for the unasked question and answers it by pulling you the rest of the way back with her. It's close and certain and entirely mutual, the windows white with it, the city erased. After, she's folded against you in a space far too small for two people and not complaining about it once.", "The overlook keeps its own counsel about the rest."], fx: { rom: 19, lib: 18, inti: 6, kiss: true } },
+        win: { lines: ["She holds your eyes for the unasked question and answers it by pulling you the rest of the way back with her, no hesitation, the decision made for both of you in about a second. It's close and certain and entirely mutual, the whole car gone white with it, the city erased, her breath and your name and the seat creaking and absolutely none of you caring about the last one. She is not quiet. There is nobody up here to be quiet for and she knows it.", "After, she's draped boneless half over you in a space built for one, tracing your jaw, watching the fog go slowly clear again, in no hurry to fix any of it."], fx: { rom: 19, lib: 18, inti: 6, kiss: true } },
         lose: { hard: true, fx: { rom: -11, aff: -7 }, lines: ["She stops your hand flat. \"No — not like that, not without.\" It's a line, not a mood, and you went over it. The fog on the glass goes from intimate to just cold, and the night with it."] },
       },
       back: { fx: { rom: 2, aff: 3 }, lines: ["You ease it back down to forehead-to-forehead in a too-small space, both of you breathing, the city slowly bleeding back through the clearing fog. \"…probably smart,\" she admits, not moving an inch."] },

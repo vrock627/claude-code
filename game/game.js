@@ -703,6 +703,7 @@
     if (sl) w.appendChild(el("p", "char-line dim", sl));
     const o = el("div", "choices");
     homeChildren(node).forEach((child, i) => {
+      if (child.ustep && !undressVisible(child)) return;
       if (child.rooms) return o.appendChild(button(child.label || "Go somewhere else", renderHomeRooms, "choice subtle"));
       if (child.back) return o.appendChild(button(child.label || "Back", () => renderHomeMenu(roomIdx, path.slice(0, -1)), "choice subtle"));
       if (gateMissing(child.gate)) return o.appendChild(button(`${child.label} — she's not there yet`, null, "choice", true));
@@ -843,6 +844,23 @@
     if (h.attire === "suit") return "suit";
     return "dressed";
   }
+  // Undress steps are state-aware: removed garments and the whole branch
+  // (once she's bare, or post-swim) stop being offered. Fixes "still able
+  // to undress her when she's already naked"; lets the chain be flat.
+  function undressVisible(child) {
+    const h = state.date && state.date.home; if (!h) return true;
+    const a = attireState(), un = h.un || {};
+    const post = a === "towel" || a === "underwear" || a === "suit" || a === "bare";
+    switch (child.ustep) {
+      case "begin": return a !== "bare";
+      case "shirt": return !post && !un.shirt;
+      case "bra": return !post && un.shirt && !un.bra;
+      case "chest": return !post && un.bra && !un.pants;
+      case "pants": return !post && !un.pants;
+      case "rest": return a !== "bare";
+      default: return true;
+    }
+  }
   function homeStateLine() {
     switch (attireState()) {
       case "bare": return "Neither of you bothered with clothes after the tub. Nobody's bringing it up — it's just how the rest of the night is now.";
@@ -934,7 +952,7 @@
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `The rest of the night · ${c.name}`));
-    for (const l of im.log.slice(-2)) w.appendChild(el("p", "char-line", subN(l, c.name)));
+    for (const l of im.log.slice(-3)) w.appendChild(el("p", "char-line", subN(l, c.name)));
     const o = el("div", "choices");
     if (im.beat < beats.length) {
       const node = beats[im.beat];
@@ -965,7 +983,7 @@
   function finishIntimacy() {
     const im = state.intim, c = D.CHARACTERS[im.id], after = im.after, tone = im.closeTone;
     state.intim = null;
-    renderResult({ title: "…and the rest of the night", lines: im.log.slice(-3).map((l) => subN(l, c.name)).concat(["Some of it stays exactly where it happened."]), tone, then: after || advancePhase, thenLabel: "…after" });
+    renderResult({ title: "…and the rest of the night", lines: im.log.slice(-3).map((l) => subN(l, c.name)), tone, then: after || advancePhase, thenLabel: "…after" });
   }
 
   // ---------- party ----------
@@ -979,14 +997,27 @@
   function bumpHeat(n) { if (state.partyRun) state.partyRun.heat = (state.partyRun.heat || 0) + (n || T.partyEventHeat || 1); }
   function recept(id) { return composite(id); }
   function partyRoomDef() { const pr = state.partyRun; return D.PARTY.rooms.find((r) => r.key === (pr && pr.room)) || D.PARTY.rooms[0]; }
+  function gameLen() { return state.pg && state.pg.game === "truthdare" ? (D.PARTY.tdRounds || 6) : (D.PARTY.gameRounds || 3); }
+  // Per-person party clothing: 0 dressed → 3 naked. Persists for the whole
+  // party (lives on partyRun, so it resets when the party ends).
+  function stripMap() { const pr = state.partyRun; if (!pr.strip) pr.strip = {}; return pr.strip; }
+  function stripLvl(key) { return Math.min(3, stripMap()[key] || 0); }
+  function stripAdd(key, n) { const m = stripMap(); m[key] = Math.min(3, (m[key] || 0) + (n || 1)); return m[key]; }
+  function stripWord(lvl) { return lvl >= 3 ? "down to nothing" : lvl === 2 ? "down to almost nothing" : "a layer down"; }
+  function clothLine(key, name) {
+    const l = stripLvl(key); if (!l) return null;
+    return `${name} is still ${stripWord(l)} from earlier — and long past minding.`;
+  }
   function partyAttireLine() {
     const pr = state.partyRun; if (!pr) return null;
-    const y = pr.youStrip || 0, h = pr.herStrip || 0;
-    if (!y && !h) return null;
-    return `Dress code's a memory — ${y ? `you're ${y} layer${y > 1 ? "s" : ""} down` : "you're somehow still fully dressed"}${h ? `, and a couple of the girls called the strip dare and meant it` : ""}.`;
+    const bits = [];
+    if (stripLvl("you")) bits.push(`you're ${stripWord(stripLvl("you"))}`);
+    for (const id of partyGuests()) if (stripLvl(id)) bits.push(`${D.CHARACTERS[id].name}'s ${stripWord(stripLvl(id))}`);
+    if (!bits.length) return null;
+    return `Dress code's a memory — ${bits.join(", ")}, and nobody's fixing it.`;
   }
   function renderParty() {
-    if (!state.partyRun) state.partyRun = { rounds: D.PARTY.rounds, eventDone: false, drinks: 0, room: "main", heat: 0, herStrip: 0, youStrip: 0 };
+    if (!state.partyRun) state.partyRun = { rounds: D.PARTY.rounds, eventDone: false, drinks: 0, room: "main", heat: 0, strip: {} };
     const pr = state.partyRun;
     if (pr.room == null) pr.room = "main";
     renderHud(); clearScreen();
@@ -1057,12 +1088,18 @@
     const c = D.CHARACTERS[id], fi = flowIndex(), rc = recept(id), w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `Dance with ${c.name}`));
     w.appendChild(el("p", "char-line", `She steps into the space, eyebrow up. "Well? Show me."`));
+    const cl = clothLine(id, c.name);
+    if (cl) w.appendChild(el("p", "char-line dim", cl));
     const o = el("div", "choices");
+    let handsyOpen = false;
     for (const mode of D.PARTY.dance) {
       const locked = fi < mode.gateFlow || rc < mode.gateRecept;
+      if (mode.id === "handsy" && !locked) handsyOpen = true;
       if (locked) o.appendChild(button(`${mode.label} — ${mode.gateFlow > fi ? "not that kind of party yet" : "she's not there with you yet"}`, null, "choice", true));
       else o.appendChild(button(`${mode.label} — ${mode.desc}`, () => partyDance(id, mode), mode.id === "handsy" ? "choice move" : "choice"));
     }
+    if (handsyOpen && stripLvl("you") >= 3 && stripLvl(id) >= 3)
+      o.appendChild(button(`🔥 …nothing left in the way — go all the way, right here`, () => renderFloorSex(id), "choice move"));
     o.appendChild(button("Back", renderParty, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
   }
@@ -1145,6 +1182,22 @@
     const c = D.CHARACTERS[id];
     renderResult({ title: (sc && sc.headOut) || "Back to the noise — eventually", lines: [`You drift back in separately, like that fools anyone. ${c.name} catches your eye across the room once and very deliberately looks away.`], tone: "good", then: partyAfter });
   }
+  function renderFloorSex(id) {
+    const c = D.CHARACTERS[id], FS = D.PARTY.floorSex;
+    const sc = { win: FS.win, headOut: FS.headOut };
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `On the floor · ${c.name}`));
+    w.appendChild(el("p", "char-line", subN(FS.ask, c.name)));
+    const o = el("div", "choices");
+    o.appendChild(button("Yes — right here, right now", () => {
+      adjustBar(id, "romance", T.privateReward.romance); adjustBar(id, "libido", T.privateReward.libido + 4); adjustBar(id, "attraction", T.privateReward.attractionEvent); bumpHeat(2);
+      renderResult({ title: "Nobody's looking anyway", lines: FS.win.map((l) => subN(l, c.name)), tone: "good", then: () => renderPartyProtection(id, sc), thenLabel: "…and then" });
+    }, "choice move"));
+    o.appendChild(button("Pull her somewhere with a door first", () => renderHookup(id, "room"), "choice"));
+    o.appendChild(button("Not in front of everyone — back off", () => { adjustBar(id, "affection", 1); renderResult({ title: "Pulled back", lines: [`You laugh it off and find your clothes; ${c.name} does too, unbothered, already plotting. Affection +1.`], tone: "good", then: partyAfter }); }, "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
+  }
   function renderBodyShot(id) {
     const c = D.CHARACTERS[id], B = D.PARTY.bodyShot;
     renderHud(); clearScreen();
@@ -1224,7 +1277,7 @@
   }
   function nextGameRound() {
     const pg = state.pg;
-    if (pg.round >= D.PARTY.gameRounds) { renderResult({ title: "Game over", lines: ["The circle breaks up, someone refills cups, the night rolls on."], tone: "neutral", then: partyAfter }); return; }
+    if (pg.round >= gameLen()) { renderResult({ title: "Game over", lines: ["The circle breaks up, someone refills cups, the night rolls on."], tone: "neutral", then: partyAfter }); return; }
     pg.round += 1;
     if (pg.game === "truthdare") return roundTruthDare();
     if (pg.game === "spin") return roundSpin();
@@ -1247,9 +1300,9 @@
     const narr = guestNarration(spicyOK);
     if (upYou) {
       const tier = spicyOK ? partyTier(null) : "plain";
-      gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, narr, tier === "scorch" ? "The bottle stops on you. The circle goes feral." : "The bottle stops on you. The circle leans in.", [
-        ["Truth", () => tdYou("truth", tier)], ["Dare", () => tdYou("dare", tier)],
-      ]);
+      const tdButtons = [["Truth", () => tdYou("truth", tier)], ["Dare (on you)", () => tdYou("dare", tier)]];
+      if (guests.length) tdButtons.push(["Hand out a dare — your call", () => renderMakeDare(tier)]);
+      gameShell(`🎲 Truth or Dare · round ${pg.round}/${gameLen()}`, narr, tier === "scorch" ? "The bottle stops on you. The circle goes feral." : "The bottle stops on you. The circle leans in.", tdButtons);
     } else {
       const who = one(guests), c = D.CHARACTERS[who];
       const tier = spicyOK ? partyTier(who) : "plain";
@@ -1257,7 +1310,7 @@
       if (tier !== "plain" && Math.random() < 0.34) return roundGuestStrip(who, tier, others);
       const beat = one(tierPool(tier, D.PARTY.guestBeats, D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats)).replace(/\{n\}/g, c.name);
       const big = tier === "scorch";
-      gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, others, `${beat}${tier !== "plain" ? " She catches your eye doing it." : ""}  ·  What do you do?`, [
+      gameShell(`🎲 Truth or Dare · round ${pg.round}/${gameLen()}`, others, `${beat}${tier !== "plain" ? " She catches your eye doing it." : ""}  ·  What do you do?`, [
         ["Cheer her on, loudest in the room", () => { adjustBar(who, "romance", big ? 7 : tier === "spicy" ? 5 : 3); adjustBar(who, "libido", big ? 7 : tier === "spicy" ? 4 : 1); afterGameRound(`You're the loudest one clapping. ${c.name} plays the whole bit straight to you and makes very sure you know it. Romance +${big ? 7 : tier === "spicy" ? 5 : 3}${tier !== "plain" ? ` · Libido +${big ? 7 : 4}` : ""}.`); }],
         ["Stay unreadable", () => { adjustBar(who, "romance", 1); afterGameRound(`You give her absolutely nothing. ${c.name} pushes the bit twice as hard just to crack your face — and clocks, annoyed, that it didn't work. Romance +1.`); }],
       ]);
@@ -1283,6 +1336,37 @@
       }
     }
     gameShell(`🎲 Your ${kind}${tier === "scorch" ? " (no mercy)" : ""}`, [], `The dare: "${prompt}"`, buttons);
+  }
+  function renderMakeDare(tier) {
+    const guests = partyGuests();
+    gameShell("🎯 Your dare to give — who's it on?", [], "The bottle's yours; the dare is too. Who are you putting on the spot?",
+      guests.map((id) => [`${D.CHARACTERS[id].emoji} ${D.CHARACTERS[id].name}`, () => renderMakeDarePick(id, tier)])
+        .concat([["Never mind — pass it on", () => afterGameRound("You wave it off and let someone else take the turn. The circle groans.", "neutral")]]));
+  }
+  function renderMakeDarePick(id, tier) {
+    const c = D.CHARACTERS[id], MD = D.PARTY.makeDares;
+    const pool = (MD.plain || []).slice();
+    if (tier !== "plain") pool.push(...(MD.spicy || []));
+    if (tier === "scorch") pool.push(...(MD.scorch || []));
+    const picks = pickN(pool, Math.min(4, pool.length));
+    gameShell(`🎯 Dare ${c.name} to —`, [], `She folds her arms, already half-grinning. "Go on then. Try me."`,
+      picks.map((d) => [`"${c.name}, ${d}."`, () => resolveMadeDare(id, d, tier)])
+        .concat([["Back", () => renderMakeDare(tier)]]));
+  }
+  function resolveMadeDare(id, dareText, tier) {
+    const c = D.CHARACTERS[id], big = tier === "scorch";
+    const roll = d20(), gauge = Math.floor(composite(id) / 8) + Math.floor(barVal(id, "libido") / 9);
+    const dc = big ? 14 : 12, ok = roll !== 1 && (roll === 20 || roll + gauge + T.partyVibe >= dc);
+    const box = { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "your dare", total: roll + gauge + T.partyVibe, dc };
+    if (ok) {
+      const rm = big ? 13 : 9, lb = big ? 12 : 7;
+      adjustBar(id, "romance", rm); adjustBar(id, "libido", lb); adjustBar(id, "attraction", big ? 3 : 1); bumpHeat();
+      if (/cloth|layer/i.test(dareText)) stripAdd(id);
+      afterGameRound(`"${c.name}, ${dareText}." She holds your eyes the whole time she does it — no flinch, all the way, played straight back at you. The circle detonates. Romance +${rm} · Libido +${lb}.`, "good", box);
+    } else {
+      adjustBar(id, "romance", -3); adjustBar(id, "affection", -3);
+      afterGameRound(`"${c.name}, ${dareText}." She tips her head, considers it, and says "…nah" with a smile that costs you anyway. The circle "oooh"s; she sips her drink. Romance −3 · Affection −3.`, "bad", box);
+    }
   }
   function renderDareFollow(tier) {
     const guests = partyGuests();
@@ -1316,7 +1400,7 @@
   }
   function playerStrip(tier) {
     const guests = partyGuests(), focus = guests.length ? one(guests) : null, c = focus ? D.CHARACTERS[focus] : null;
-    const pr = state.partyRun; pr.youStrip = (pr.youStrip || 0) + 1; bumpHeat();
+    stripAdd("you"); bumpHeat();
     const roll = d20(), good = roll !== 1 && (roll === 20 || roll + effStat("charisma") + T.partyVibe >= 12);
     const box = { d20: roll, stat: `CHA ${effStat("charisma")}`, vibe: T.partyVibe, vibeNote: "the circle", total: roll + effStat("charisma") + T.partyVibe, dc: 12 };
     if (focus) { adjustBar(focus, "romance", good ? T.stripDare.romance : 3); adjustBar(focus, "libido", good ? T.stripDare.libido : 3); if (good) adjustBar(focus, "attraction", 2); }
@@ -1325,11 +1409,11 @@
   }
   function roundGuestStrip(who, tier, others) {
     const pg = state.pg, c = D.CHARACTERS[who], big = tier === "scorch";
-    gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, others,
+    gameShell(`🎲 Truth or Dare · round ${pg.round}/${gameLen()}`, others,
       `${c.name} draws the strip dare — circle's choice, one layer. "${one(D.PARTY.stripDares)}"  ·  What do you do?`, [
       ["Watch like it's nothing", () => {
         const r = stripRoll(who, big ? 14 : 12);
-        if (r.ok) { adjustBar(who, "romance", T.stripDare.romance); adjustBar(who, "libido", T.stripDare.libido); adjustBar(who, "attraction", 2); state.partyRun.herStrip = (state.partyRun.herStrip || 0) + 1; bumpHeat();
+        if (r.ok) { adjustBar(who, "romance", T.stripDare.romance); adjustBar(who, "libido", T.stripDare.libido); adjustBar(who, "attraction", 2); stripAdd(who); bumpHeat();
           afterGameRound(subN(D.PARTY.strip.her.win, c.name) + ` Romance +${T.stripDare.romance} · Libido +${T.stripDare.libido}.`, "good", r.box); }
         else afterGameRound(subN(D.PARTY.strip.her.lose, c.name), "neutral", r.box);
       }],
@@ -1338,7 +1422,7 @@
   }
   function spinStrip(id) {
     const c = D.CHARACTERS[id], r = stripRoll(id, 13);
-    if (r.ok) { adjustBar(id, "romance", T.stripDare.romance); adjustBar(id, "libido", T.stripDare.libido); adjustBar(id, "attraction", 2); state.partyRun.herStrip = (state.partyRun.herStrip || 0) + 1; bumpHeat();
+    if (r.ok) { adjustBar(id, "romance", T.stripDare.romance); adjustBar(id, "libido", T.stripDare.libido); adjustBar(id, "attraction", 2); stripAdd(id); bumpHeat();
       afterGameRound(subN(D.PARTY.strip.her.win, c.name) + ` Romance +${T.stripDare.romance} · Libido +${T.stripDare.libido}.`, "good", r.box); }
     else afterGameRound(subN(D.PARTY.strip.her.lose, c.name), "neutral", r.box);
   }
@@ -1363,12 +1447,12 @@
       const c = D.CHARACTERS[target], fi = flowIndex();
       const buttons = [["Lean in for it", () => spinKiss(target)], ["Peck on the cheek", () => { adjustBar(target, "romance", 4); afterGameRound(`A peck. ${c.name} grins. Safe. Romance +4.`); }], ["Laugh it off", () => { adjustBar(target, "affection", 2); afterGameRound(`You ham it up; ${c.name} cracks up. Affection +2.`); }]];
       if (fi >= spicyAt()) buttons.splice(1, 0, [`👕 Make it a dare — she loses a layer`, () => spinStrip(target)]);
-      gameShell(`🍾 Spin the Bottle · round ${pg.round}/${D.PARTY.gameRounds}`, narr, `It slows… and points at ${c.name}.${fi >= spicyAt() ? " The room goes \"ooooh.\"" : ""}`, buttons);
+      gameShell(`🍾 Spin the Bottle · round ${pg.round}/${gameLen()}`, narr, `It slows… and points at ${c.name}.${fi >= spicyAt() ? " The room goes \"ooooh.\"" : ""}`, buttons);
     } else {
       const a = one(circle), b = one(circle.filter((x) => x !== a) || circle);
       const an = D.CHARACTERS[a].name, bn = b ? D.CHARACTERS[b].name : "the snack table";
       if (b) { adjustBar(a, "romance", 1); }
-      gameShell(`🍾 Spin the Bottle · round ${pg.round}/${D.PARTY.gameRounds}`, narr.concat([`The bottle picks ${an} and ${bn}. The circle howls; you're just a spectator this round.`]), null, [["Watch it play out", () => afterGameRound(`${an} and ${bn} sort it out, to much applause.`)]]);
+      gameShell(`🍾 Spin the Bottle · round ${pg.round}/${gameLen()}`, narr.concat([`The bottle picks ${an} and ${bn}. The circle howls; you're just a spectator this round.`]), null, [["Watch it play out", () => afterGameRound(`${an} and ${bn} sort it out, to much applause.`)]]);
     }
   }
   function spinKiss(id) {
@@ -1395,7 +1479,7 @@
   }
   function throwPong() {
     const pg = state.pg, c = D.CHARACTERS[pg.partner];
-    gameShell(`🏓 Beer Pong w/ ${c ? c.name : "the table"} · cup ${pg.round}/${D.PARTY.gameRounds}`, guestNarration(false), `You: ${pg.made} · Them: ${pg.opp}. Your shot:`, [
+    gameShell(`🏓 Beer Pong w/ ${c ? c.name : "the table"} · cup ${pg.round}/${gameLen()}`, guestNarration(false), `You: ${pg.made} · Them: ${pg.opp}. Your shot:`, [
       ["Careful aim (INT)", () => pongShot("int")], ["Trick shot (STY, swingy)", () => pongShot("sty")], [c ? `Hand it to ${c.name}` : "Let it ride", () => pongShot("her")],
     ]);
   }
@@ -1406,13 +1490,13 @@
     else if (kind === "sty") hit = d20() + effStat("style") >= (Math.random() < 0.5 ? 10 : 20);
     else hit = Math.random() < 0.55;
     if (hit) pg.made++; if (Math.random() < 0.45) pg.opp++;
-    if (pg.round < D.PARTY.gameRounds) { afterGameRound(hit ? `Splash. ${c ? c.name + " whoops and high-fives you." : "Nice."}` : `Rimmed out. ${c ? c.name + ": \"Next one.\"" : ""}`, hit ? "good" : "neutral"); return; }
+    if (pg.round < gameLen()) { afterGameRound(hit ? `Splash. ${c ? c.name + " whoops and high-fives you." : "Nice."}` : `Rimmed out. ${c ? c.name + ": \"Next one.\"" : ""}`, hit ? "good" : "neutral"); return; }
     const won = pg.made >= pg.opp, rd = won ? 9 : 2, af = won ? 4 : 1;
     if (pg.partner) { adjustBar(pg.partner, "romance", rd); adjustBar(pg.partner, "affection", af); if (won) adjustBar(pg.partner, "attraction", 2); }
     afterGameRound(won ? `You take it. ${c ? c.name + " jumps on you, the table roaring." : "Winners."} Romance +${rd} · Affection +${af}.` : `Beaten this round. ${c ? c.name + ": \"Rematch. You owe me.\"" : ""} Romance +${rd}.`, won ? "good" : "neutral");
   }
   function afterGameRound(line, tone, roll) {
-    renderResult({ title: `Round ${state.pg.round}`, roll: roll || null, lines: [line], tone: tone || "good", then: nextGameRound, thenLabel: state.pg.round >= D.PARTY.gameRounds ? "Wrap up" : "Next round" });
+    renderResult({ title: `Round ${state.pg.round}`, roll: roll || null, lines: [line], tone: tone || "good", then: nextGameRound, thenLabel: state.pg.round >= gameLen() ? "Wrap up" : "Next round" });
   }
 
   function renderResult(p) {

@@ -206,6 +206,23 @@ check(D.PARTY.bodyShot && D.PARTY.bodyShot.ask && D.PARTY.bodyShot.who.you && D.
 check(T.bodyShot && T.bodyShot.dc > 0 && T.bodyShot.romance > 0, "TUNING.bodyShot missing");
 check(D.PARTY.hookup && D.PARTY.hookup.ask && D.PARTY.hookup.esc.length >= 2 && D.PARTY.hookup.win.length, "PARTY.hookup malformed");
 for (const e of D.PARTY.hookup.esc) check(e.label && typeof e.mod === "number" && e.line, `hookup esc malformed: ${e.label}`);
+check(typeof D.PARTY.tdRounds === "number" && D.PARTY.tdRounds >= 6, "PARTY.tdRounds should be a full 6-round game");
+check(D.PARTY.makeDares && Array.isArray(D.PARTY.makeDares.plain) && D.PARTY.makeDares.plain.length && Array.isArray(D.PARTY.makeDares.spicy) && D.PARTY.makeDares.spicy.length, "PARTY.makeDares (player-issued) missing/empty");
+check(D.PARTY.makeDares.spicy.some((d) => /cloth|layer/i.test(d)), "makeDares should include a strip option");
+check(D.PARTY.floorSex && D.PARTY.floorSex.ask && Array.isArray(D.PARTY.floorSex.win) && D.PARTY.floorSex.win.length && D.PARTY.floorSex.headOut, "PARTY.floorSex malformed");
+// Undress tree: flat, state-tagged steps so removed/irrelevant garments
+// and the whole branch (when bare) stop being offered.
+(function () {
+  let begin = null;
+  (function find(nodes) { for (const n of nodes || []) { if (n.ustep === "begin") begin = n; if (n.sub) find(n.sub); if (n.actions) find(n.actions); } })(D.HOME.rooms);
+  check(begin && begin.sub, "HOME undress: a ustep:'begin' node with steps");
+  const steps = begin.sub.map((s) => s.ustep).filter(Boolean);
+  for (const need of ["shirt", "bra", "pants", "rest"]) check(steps.includes(need), `undress missing ustep ${need}`);
+  check(begin.sub.some((s) => s.rooms), "undress chain must offer 'go somewhere else' (stop, don't just back up)");
+  check(begin.sub.some((s) => s.back), "undress chain must offer a stop/back");
+  const rest = begin.sub.find((s) => s.ustep === "rest");
+  check(rest && rest.roll && rest.roll.win && rest.roll.win.sex, "undress 'rest' must route to the sex beat");
+})();
 check(D.PARTY.flows[D.PARTY.flows.length - 1].at <= 4, "party flow should escalate sooner (top tier at <= 4)");
 check(typeof T.partySpicyAt === "number" && T.partySpicyAt >= 1, "TUNING.partySpicyAt missing");
 check(typeof T.partyDrinkFlow === "number" && T.partyDrinkFlow >= 1, "TUNING.partyDrinkFlow missing");
