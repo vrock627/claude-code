@@ -48,6 +48,7 @@ for (const [id, it] of Object.entries(D.ITEMS)) {
   if (it.type === "tempStat") check(STAT.has(it.stat) && it.amount > 0 && it.phases > 0, `item ${id}: temp`);
   else if (it.type === "permStat") check(STAT.has(it.stat) && it.amount > 0, `item ${id}: perm`);
   else if (it.type === "gift") check(it.value > 0, `item ${id}: gift value`);
+  else if (it.type === "consumable") check(it.desc, `item ${id}: consumable needs desc`);
   else check(false, `item ${id}: bad type ${it.type}`);
 }
 for (const [loc, list] of Object.entries(D.SHOPS)) {
@@ -106,20 +107,22 @@ check(D.HOME && D.HOME.intro.includes("{n}"), "HOME.intro must address her ({n})
 check(D.HOME.bedroomGate && D.HOME.bedroomGate.inti > 0 && D.HOME.bedroomGate.rom > 0, "HOME.bedroomGate must be meaningful");
 const roomKeys = D.HOME.rooms.map((r) => r.key);
 for (const need of ["living", "kitchen", "yard", "bedroom"]) check(roomKeys.includes(need), `HOME missing room ${need}`);
-let sawChance = false, sawRoll = false, sawNested = false, sawHard = false, sawKissFx = false;
+let sawChance = false, sawRoll = false, sawHard = false, sawKissFx = false, sawSex = false, sawInto = false, maxDepth = 0;
 (function walk(nodes, depth) {
+  maxDepth = Math.max(maxDepth, depth);
   for (const n of nodes) {
     check(n.rooms || n.back || n.label, "HOME node needs a label/nav");
     if (n.gate) check(n.gate.inti > 0 || n.gate.rom > 0 || n.gate.lib > 0, `HOME gate empty: ${n.label}`);
     if (n.chance) sawChance = true;
-    if (n.sub) { sawNested = sawNested || depth >= 0; check(n.sub.length >= 2, `HOME sub too small: ${n.label}`); walk(n.sub, depth + 1); }
+    if (n.sub) { check(n.sub.length >= 2, `HOME sub too small: ${n.label}`); if (n.roll) sawInto = true; walk(n.sub, depth + 1); }
     if (n.roll) {
       sawRoll = true;
       check(n.roll.dc > 0 && n.roll.win && n.roll.lose, `HOME roll malformed: ${n.label}`);
-      check(n.roll.win.lines && n.roll.win.lines.length, `HOME roll win no lines: ${n.label}`);
-      check(n.roll.lose.lines && n.roll.lose.lines.length, `HOME roll lose no lines: ${n.label}`);
+      if (n.roll.win.sex) sawSex = true;
+      else check(n.roll.win.lines && n.roll.win.lines.length, `HOME roll win no lines: ${n.label}`);
+      check(n.roll.lose.hard || (n.roll.lose.lines && n.roll.lose.lines.length), `HOME roll lose no lines: ${n.label}`);
       if (n.roll.lose.hard) sawHard = true;
-      if (n.roll.win.kiss) sawKissFx = true;
+      if (n.roll.win.kiss || (n.roll.win.fx && n.roll.win.fx.kiss)) sawKissFx = true;
     }
     if (n.fx) check(typeof n.fx === "object", `HOME fx bad: ${n.label}`);
     if (!n.sub && !n.roll && !n.chance && !n.rooms && !n.back) check(n.lines && n.lines.length, `HOME terminal no lines: ${n.label}`);
@@ -127,7 +130,16 @@ let sawChance = false, sawRoll = false, sawNested = false, sawHard = false, sawK
 })(D.HOME.rooms.flatMap((r) => r.actions), 0);
 check(sawChance, "HOME needs the contextual (hot-tub/swim) check");
 check(sawRoll && sawHard && sawKissFx, "HOME needs rolls incl. a hard-fail and a kiss payoff");
-check(sawNested, "HOME needs nested sub-menus (e.g. couch → make out)");
+check(maxDepth >= 3, `HOME needs deep nesting (couch→undress→shirt→bra); got depth ${maxDepth}`);
+check(sawInto, "HOME needs roll-into-submenu nodes (undress chain)");
+check(sawSex, "HOME needs a node routing to the sex/condom choice");
+const sx = D.HOME.sex;
+check(sx && sx.ask && sx.condom && sx.raw && sx.back, "HOME.sex needs ask/condom/raw/back");
+check(sx.condom.fx && sx.condom.lines.length, "HOME.sex.condom malformed");
+check(sx.raw.dc > 0 && sx.raw.win.fx && sx.raw.lose.hard, "HOME.sex.raw needs dc, win.fx, hard lose");
+check(sx.back.lines && sx.back.lines.length, "HOME.sex.back needs lines");
+check(D.ITEMS.condom && D.ITEMS.condom.type === "consumable", "condom item missing/typed wrong");
+check(D.SHOPS.mall.includes("condom"), "condoms should be buyable (mall)");
 check(D.HOME.swim && D.HOME.swim.hasSuit && D.HOME.swim.noSuit.length >= 3, "HOME.swim needs has-suit + 3 no-suit options");
 check(D.HOME.swim.noSuit.some((o) => o.roll && o.roll.lose.hard), "skinny-dip should carry a real risk");
 check(D.HOME.rooms.every((r) => r.actions.some((a) => a.rooms)), "every room needs a 'go somewhere else'");
