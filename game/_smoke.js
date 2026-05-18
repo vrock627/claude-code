@@ -143,6 +143,78 @@ check(D.SHOPS.mall.includes("condom"), "condoms should be buyable (mall)");
 check(D.HOME.swim && D.HOME.swim.hasSuit && D.HOME.swim.noSuit.length >= 3, "HOME.swim needs has-suit + 3 no-suit options");
 check(D.HOME.swim.noSuit.some((o) => o.roll && o.roll.lose.hard), "skinny-dip should carry a real risk");
 check(D.HOME.rooms.every((r) => r.actions.some((a) => a.rooms)), "every room needs a 'go somewhere else'");
+// Hot tub is now a real series: entry → inTub → getOut, with attire set.
+check(D.HOME.swim.hasSuit.swimNext === "inTub", "hot tub: suit entry must route into the series");
+check(Array.isArray(D.HOME.swim.inTub) && D.HOME.swim.inTub.length >= 3, "hot tub needs an inTub series");
+check(Array.isArray(D.HOME.swim.getOut) && D.HOME.swim.getOut.length >= 2, "hot tub needs a getOut series");
+check(D.HOME.swim.inTub.some((n) => n.goOut) || D.HOME.swim.inTub.some((n) => n.sub), "inTub must lead somewhere (goOut/sub)");
+check(D.HOME.swim.getOut.some((n) => (n.fx && n.fx.attire) || (n.roll && n.roll.win.fx && n.roll.win.fx.attire)), "getOut must set her attire");
+let swimSawSex = false;
+(function walkSwim(nodes) {
+  for (const n of nodes || []) {
+    if (n.roll && n.roll.win && n.roll.win.sex) swimSawSex = true;
+    if (n.sub) walkSwim(n.sub);
+  }
+})([].concat(D.HOME.swim.noSuit, D.HOME.swim.inTub, D.HOME.swim.getOut));
+check(swimSawSex, "hot tub should be able to lead all the way");
+
+// Scenic overlook: nested like HOME, own sex block, photoshoot branches.
+check(D.OVERLOOK && D.OVERLOOK.intro.includes("{n}"), "OVERLOOK.intro must address her ({n})");
+const ovRoomKeys = D.OVERLOOK.rooms.map((r) => r.key);
+for (const need of ["view", "car"]) check(ovRoomKeys.includes(need), `OVERLOOK missing room ${need}`);
+let ovDepth = 0, ovSex = false, ovKiss = false, ovHard = false;
+(function walkOv(nodes, depth) {
+  ovDepth = Math.max(ovDepth, depth);
+  for (const n of nodes) {
+    check(n.rooms || n.back || n.label, "OVERLOOK node needs a label/nav");
+    if (n.gate) check(n.gate.inti > 0 || n.gate.rom > 0 || n.gate.lib > 0, `OVERLOOK gate empty: ${n.label}`);
+    if (n.sub) { check(n.sub.length >= 2, `OVERLOOK sub too small: ${n.label}`); walkOv(n.sub, depth + 1); }
+    if (n.roll) {
+      check(n.roll.dc > 0 && n.roll.win && n.roll.lose, `OVERLOOK roll malformed: ${n.label}`);
+      if (n.roll.win.sex) ovSex = true; else check(n.roll.win.lines && n.roll.win.lines.length, `OVERLOOK roll win no lines: ${n.label}`);
+      check(n.roll.lose.hard || (n.roll.lose.lines && n.roll.lose.lines.length), `OVERLOOK roll lose no lines: ${n.label}`);
+      if (n.roll.lose.hard) ovHard = true;
+      if (n.roll.win.kiss || (n.roll.win.fx && n.roll.win.fx.kiss)) ovKiss = true;
+    }
+    if (!n.sub && !n.roll && !n.rooms && !n.back) check(n.lines && n.lines.length, `OVERLOOK terminal no lines: ${n.label}`);
+  }
+})(D.OVERLOOK.rooms.flatMap((r) => r.actions), 0);
+check(ovDepth >= 3, `OVERLOOK needs deep nesting (photoshoot → tier → action); got ${ovDepth}`);
+check(ovSex && ovKiss && ovHard, "OVERLOOK needs a sex route, a kiss payoff, and a hard fail");
+const osx = D.OVERLOOK.sex;
+check(osx && osx.ask && osx.condom && osx.raw && osx.back, "OVERLOOK.sex needs ask/condom/raw/back");
+check(osx.condom.fx && osx.condom.lines.length && osx.raw.dc > 0 && osx.raw.win.fx && osx.raw.lose.hard, "OVERLOOK.sex malformed");
+check(D.OVERLOOK.rooms.every((r) => r.actions.some((a) => a.rooms)), "every overlook room needs a nav out");
+check(D.OVERLOOK.rooms.some((r) => r.actions.some((a) => /picture/i.test(a.label))), "overlook needs the take-a-picture branch");
+const ovLoc = D.LOCATIONS.overlook;
+check(ovLoc && ovLoc.overlookSpot && typeof ovLoc.dateCost === "number", "overlook LOCATION needs overlookSpot + dateCost");
+check(!ovLoc.dateSpot, "overlook must NOT be a DATE_SCENES dateSpot (it's the nested tree)");
+
+// Party rooms, male NPCs, strip dares, body shots, room hookups.
+check(Array.isArray(D.PARTY.rooms) && D.PARTY.rooms.length >= 3, "PARTY needs rooms");
+check(D.PARTY.rooms[0].key === "main", "first party room should be 'main'");
+for (const r of D.PARTY.rooms) check(r.key && r.name && r.desc, `party room shape: ${r.key}`);
+check(D.PARTY.rooms.some((r) => r.gateFlow >= 1), "some party room should gate on flow");
+check(Array.isArray(D.PARTY.npcs) && D.PARTY.npcs.length >= 2, "PARTY.npcs needed");
+check(Array.isArray(D.PARTY.npcBeats) && D.PARTY.npcBeats.every((b) => b.includes("{n}") && b.includes("{g}")), "npcBeats need {n} and {g}");
+check(T.npcFlirt && T.npcFlirt.cutIn && T.npcFlirt.stayCool && T.npcFlirt.sulk && T.npcFlirt.letHer, "TUNING.npcFlirt incomplete");
+check(Array.isArray(D.PARTY.stripDares) && D.PARTY.stripDares.length, "PARTY.stripDares missing");
+check(D.PARTY.strip && D.PARTY.strip.you.ok && D.PARTY.strip.you.shy && D.PARTY.strip.her.win && D.PARTY.strip.her.lose, "PARTY.strip malformed");
+check(D.PARTY.strip.her.win.includes("{n}") && D.PARTY.strip.her.lose.includes("{n}"), "strip.her lines need {n}");
+check(T.stripDare && T.stripDare.romance > 0 && T.stripFail, "TUNING.stripDare/stripFail missing");
+check(D.PARTY.bodyShot && D.PARTY.bodyShot.ask && D.PARTY.bodyShot.who.you && D.PARTY.bodyShot.who.her && D.PARTY.bodyShot.win && D.PARTY.bodyShot.lose, "PARTY.bodyShot malformed");
+check(T.bodyShot && T.bodyShot.dc > 0 && T.bodyShot.romance > 0, "TUNING.bodyShot missing");
+check(D.PARTY.hookup && D.PARTY.hookup.ask && D.PARTY.hookup.esc.length >= 2 && D.PARTY.hookup.win.length, "PARTY.hookup malformed");
+for (const e of D.PARTY.hookup.esc) check(e.label && typeof e.mod === "number" && e.line, `hookup esc malformed: ${e.label}`);
+check(D.PARTY.flows[D.PARTY.flows.length - 1].at <= 4, "party flow should escalate sooner (top tier at <= 4)");
+check(typeof T.partySpicyAt === "number" && T.partySpicyAt >= 1, "TUNING.partySpicyAt missing");
+check(typeof T.partyDrinkFlow === "number" && T.partyDrinkFlow >= 1, "TUNING.partyDrinkFlow missing");
+
+// Party hookups now get the same protection + finish choice as home.
+const PP = D.INTIMACY.party;
+check(PP && PP.ask && PP.condom && PP.condom.lines.length && PP.raw && PP.raw.lines.length && PP.back && PP.back.lines.length, "INTIMACY.party (party protection) malformed");
+check(PP.condom.fx && PP.raw.fx && PP.back.fx, "INTIMACY.party fx missing");
+
 check(D.PARTY.kissDare && typeof D.PARTY.kissDare === "string", "PARTY.kissDare prompt missing");
 for (const b of D.PARTY.guestBeats.concat(D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats)) check(b.length > 40 && b.includes("{n}"), `guest beat too vague: ${b}`);
 check(D.PARTY.scorchingTruths.length && D.PARTY.scorchingDares.length && D.PARTY.scorchingGuestBeats.length, "scorching pools empty");
