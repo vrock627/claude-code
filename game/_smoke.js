@@ -156,6 +156,14 @@ for (const node of D.INTIMACY.beats.concat([D.INTIMACY.close])) {
   for (const op of node.opts) check(op.label && op.line && op.fx && typeof op.fx === "object", `INTIMACY opt malformed: ${op.label}`);
 }
 check(D.INTIMACY.close.opts.some((o) => o.tone), "INTIMACY close should set a tone");
+const F = D.INTIMACY.finish;
+check(F && F.q && F.pull && F.inside, "INTIMACY.finish needs q/pull/inside");
+for (const k of ["pull", "inside"]) check(F[k].label && F[k].line && F[k].fx, `INTIMACY.finish.${k} malformed`);
+const PR = D.INTIMACY.pregnancy;
+check(PR && PR.wait && PR.say && PR.react.warm && PR.react.cool && PR.opts.length >= 2, "INTIMACY.pregnancy malformed");
+for (const op of PR.opts) check(op.label && op.line && op.fx && op.status && op.kind, `pregnancy opt malformed: ${op.label}`);
+check(typeof T.pregChanceRaw === "number" && T.pregChanceRaw > 0 && T.pregChanceRaw < 1, "TUNING.pregChanceRaw out of range");
+check(typeof T.pregTalkAfterDays === "number" && T.pregTalkAfterDays >= 1, "TUNING.pregTalkAfterDays missing");
 
 // Date-ending dialogue.
 check(Array.isArray(D.DATE_END) && D.DATE_END.length >= 2, "DATE_END missing");

@@ -15,6 +15,7 @@
       day: 1, phaseIndex: 0, money: T.startMoney, bars,
       metCount: perChar(() => 0), learned: perChar(() => []),
       milestones: perChar(() => ({ number: false, kiss: false, dates: 0 })),
+      preg: perChar(() => null),
       inventory: {}, buffs: [], textedToday: perChar(() => false),
       party: null, partyRun: null, convo: null, date: null, pg: null,
     };
@@ -110,7 +111,8 @@
     for (const id of CHAR_IDS) {
       const c = D.CHARACTERS[id], comp = composite(id), m = state.milestones[id];
       const card = el("div", "person");
-      const marks = `${m.number ? " ☎" : ""}${m.dates ? ` 💞${m.dates}` : ""}${m.kiss ? " 💋" : ""}`;
+      const pg = state.preg[id];
+      const marks = `${m.number ? " ☎" : ""}${m.dates ? ` 💞${m.dates}` : ""}${m.kiss ? " 💋" : ""}${pg ? (pg.status === "together" ? " 👶" : " 🤰") : ""}`;
       card.appendChild(el("div", "person-name", `${c.emoji} ${c.name}${marks}`));
       card.appendChild(el("div", "person-stage", `${stageFor(comp)} · Interest ${comp}`));
       const bars = el("div", "barset");
@@ -348,7 +350,32 @@
     if (party) { v += T.partyVibe; notes.push("party buzz"); if (style === "thoughtful") { v -= T.partyLoud; notes.push("too loud to go deep"); } }
     return { v, note: notes.join(", ") || "neutral read" };
   }
-  function startConvo(id, locId, party) { state.convo = { id, locId, beat: 0, momentum: 0, party: !!party }; renderConvoBeat(); }
+  function startConvo(id, locId, party) {
+    const pg = state.preg[id];
+    if (pg && !pg.talked && state.day - pg.sinceDay >= T.pregTalkAfterDays)
+      return renderPregnancyTalk(id, !!party);
+    state.convo = { id, locId, beat: 0, momentum: 0, party: !!party };
+    renderConvoBeat();
+  }
+  function renderPregnancyTalk(id, party) {
+    const c = D.CHARACTERS[id], P = D.INTIMACY.pregnancy;
+    const ta = c.traitAffinity;
+    const reactKey = ((ta.classy || 0) + (ta.independent || 0)) > (ta.sincere || 0) ? "cool" : "warm";
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `${c.emoji} ${c.name}`));
+    w.appendChild(el("p", "char-line", subN(P.wait, c.name)));
+    w.appendChild(el("p", "char-line", subN(P.react[reactKey], c.name)));
+    w.appendChild(el("p", "talk-prompt", subN(P.say, c.name)));
+    const o = el("div", "choices");
+    for (const opt of P.opts) o.appendChild(button(opt.label, () => {
+      adjustBar(id, "romance", opt.fx.rom || 0); adjustBar(id, "affection", opt.fx.aff || 0);
+      state.preg[id].talked = true; state.preg[id].status = opt.status;
+      state.metCount[id] += 1;
+      renderResult({ title: "That conversation", lines: [subN(opt.line, c.name), `Romance ${opt.fx.rom >= 0 ? "+" : ""}${opt.fx.rom || 0} · Affection ${opt.fx.aff >= 0 ? "+" : ""}${opt.fx.aff || 0}`], tone: opt.kind === "wobble" ? "bad" : "good", then: party ? partyAfter : advancePhase });
+    }, opt.kind === "stay" ? "choice move" : "choice"));
+    w.appendChild(o); screen().appendChild(w);
+  }
   function renderConvoBeat() {
     renderHud(); clearScreen();
     const cv = state.convo, c = D.CHARACTERS[cv.id], mood = moodOf(cv.id);
@@ -798,7 +825,7 @@
     const roll = { d20: r.roll, stat: `read ${r.gauge} · her ${mod >= 0 ? "+" : ""}${mod}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
     if (!r.ok) return homeBail(sx.raw.lose, roll);
     homeAccrue(sx.raw.win.fx);
-    renderIntimacy(id, sx.raw.win.lines, renderDateEnd);
+    renderIntimacy(id, sx.raw.win.lines, renderDateEnd, true);
   }
   // ---- shared, non-graphic intimacy beats (home date + party slip-away) ----
   function intimFx(id, fx) {
@@ -814,24 +841,41 @@
       dt.bestQ = Math.max(dt.bestQ, (fx.rom || 0) / 4 + (fx.inti ? fx.inti * 0.4 : 0) + 1);
     }
   }
-  function renderIntimacy(id, introLines, afterFn) {
-    state.intim = { id, beat: 0, after: afterFn, log: (introLines || []).slice(), closeTone: "good" };
+  function renderIntimacy(id, introLines, afterFn, raw) {
+    state.intim = { id, beat: 0, after: afterFn, log: (introLines || []).slice(), closeTone: "good", raw: !!raw, finishDone: false };
     renderIntimacyBeat();
   }
   function renderIntimacyBeat() {
-    const im = state.intim, c = D.CHARACTERS[im.id], beats = D.INTIMACY.beats;
+    const im = state.intim, c = D.CHARACTERS[im.id], beats = D.INTIMACY.beats, F = D.INTIMACY.finish;
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `The rest of the night · ${c.name}`));
     for (const l of im.log.slice(-2)) w.appendChild(el("p", "char-line", subN(l, c.name)));
-    const node = im.beat < beats.length ? beats[im.beat] : D.INTIMACY.close;
-    w.appendChild(el("p", "talk-prompt", node.q));
     const o = el("div", "choices");
-    node.opts.forEach((opt) => o.appendChild(button(opt.label, () => {
-      intimFx(im.id, opt.fx); im.log.push(opt.line);
-      if (im.beat < beats.length) { im.beat += 1; renderIntimacyBeat(); }
-      else { im.closeTone = opt.tone || "good"; finishIntimacy(); }
-    }, "choice")));
+    if (im.beat < beats.length) {
+      const node = beats[im.beat];
+      w.appendChild(el("p", "talk-prompt", node.q));
+      node.opts.forEach((opt) => o.appendChild(button(opt.label, () => {
+        intimFx(im.id, opt.fx); im.log.push(opt.line); im.beat += 1; renderIntimacyBeat();
+      }, "choice")));
+    } else if (im.raw && !im.finishDone) {
+      w.appendChild(el("p", "talk-prompt", F.q));
+      o.appendChild(button(F.pull.label, () => {
+        intimFx(im.id, F.pull.fx); im.log.push(F.pull.line); im.finishDone = true; renderIntimacyBeat();
+      }, "choice"));
+      o.appendChild(button(F.inside.label, () => {
+        intimFx(im.id, F.inside.fx); im.log.push(F.inside.line); im.finishDone = true;
+        if (!state.preg[im.id] && Math.random() < T.pregChanceRaw)
+          state.preg[im.id] = { sinceDay: state.day, talked: false, status: null };
+        renderIntimacyBeat();
+      }, "choice move"));
+    } else {
+      const node = D.INTIMACY.close;
+      w.appendChild(el("p", "talk-prompt", node.q));
+      node.opts.forEach((opt) => o.appendChild(button(opt.label, () => {
+        intimFx(im.id, opt.fx); im.log.push(opt.line); im.closeTone = opt.tone || "good"; finishIntimacy();
+      }, "choice")));
+    }
     w.appendChild(o); screen().appendChild(w);
   }
   function finishIntimacy() {
@@ -954,7 +998,7 @@
     if (ok) {
       adjustBar(id, "romance", T.privateReward.romance + (approach === "bold" ? 3 : 0));
       adjustBar(id, "libido", T.privateReward.libido); adjustBar(id, "attraction", T.privateReward.attractionEvent);
-      renderIntimacy(id, [esc.line].concat(D.PARTY.privateScene.win), () => privateAfter(id));
+      renderIntimacy(id, [esc.line].concat(D.PARTY.privateScene.win), () => privateAfter(id), true);
     } else {
       adjustBar(id, "romance", T.privateFail.romance); adjustBar(id, "affection", T.privateFail.affection);
       state.party.guests = state.party.guests.filter((g) => g !== id);
@@ -1175,6 +1219,7 @@
       state.metCount = Object.assign(perChar(() => 0), p.metCount);
       state.learned = Object.assign(perChar(() => []), p.learned);
       state.milestones = Object.assign(perChar(() => ({ number: false, kiss: false, dates: 0 })), p.milestones || {});
+      state.preg = Object.assign(perChar(() => null), p.preg || {});
       state.inventory = p.inventory || {};
       state.buffs = Array.isArray(p.buffs) ? p.buffs : [];
       state.textedToday = Object.assign(perChar(() => false), p.textedToday);

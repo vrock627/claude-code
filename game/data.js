@@ -323,6 +323,27 @@
       { label: "Stay tangled up, talk till it's late.", fx: { rom: 10, aff: 10 }, line: "Neither of you sleeps for a while. You just talk in the dark — the good kind, the kind that's its own entire thing.", tone: "good" },
       { label: "Both of you pass out instantly.", fx: { aff: 6, rom: 4 }, line: "You get about ninety seconds of intending to talk before you're both gone, her hand still flat on your chest.", tone: "good" },
       { label: "She slips out before dawn.", fx: { atr: 4, rom: -3 }, line: "You wake to a cold half of the bed and a note: a phone number you already have, and a drawn smirk. Infuriating. Effective.", tone: "neutral" } ] },
+    // Only shown when it was unprotected. Non-graphic; "finish inside"
+    // gates a real pregnancy-risk consequence.
+    finish: {
+      q: "Right at the edge —",
+      pull: { label: "Pull out", fx: { rom: 2, aff: 3 }, line: "You pull back at the last second. {n} lets out a breath and a small laugh, foreheads together. \"…good call,\" she manages." },
+      inside: { label: "Finish inside", fx: { rom: 6, lib: 4 }, line: "Neither of you stops, or wants to. After, she stays exactly where she is for a long minute, not saying the obvious thing — and neither do you." },
+    },
+    // Days later, if it caught.
+    pregnancy: {
+      wait: "A few quiet days. Then {n} asks to meet somewhere with nobody else around — and you read it on her face before she gets a word out.",
+      react: {
+        warm: "She's scared and working very hard not to let you see how much.",
+        cool: "She's calm in the specific way that means the exact opposite of calm.",
+      },
+      say: "\"I'm late. I took a test. Two of them. It's positive.\"",
+      opts: [
+        { label: "\"Then we figure it out. Together. I'm not going anywhere.\"", kind: "stay", fx: { rom: 18, aff: 22 }, status: "together", line: "Something in her face comes apart. She doesn't say thank you — she just holds onto you like the floor moved, and doesn't let go for a while." },
+        { label: "\"I… need a minute. This is a lot.\"", kind: "wobble", fx: { rom: -9, aff: -7 }, status: "strained", line: "You watch her clock exactly how long the minute took. \"Sure,\" she says, far too evenly. \"Take your minute.\" Something cooled that won't fully warm back." },
+        { label: "\"Whatever you decide, it's your call — and I've got you either way.\"", kind: "support", fx: { rom: 10, aff: 16 }, status: "supported", line: "She lets out a breath she'd clearly been holding for days. \"Okay,\" she says. \"Okay. That — actually helps.\"" },
+      ],
+    },
   };
 
   // Deep, explorable home date. Rooms → activities → intimate sub-actions.
@@ -440,6 +461,7 @@
     dateRomance: 9, dateAffection: 5, dateAttractionEvent: 4, dateContinueMinQ: 0.2, homeContinueMinRomance: 45, maxDateVenues: 3, cheapBillPenalty: 5,
     attractK: 4, attractBaseCap: 85, attractEventCap: 22,
     giftRomanceShare: 0.4, favoriteGiftMult: 2.2,
+    pregChanceRaw: 0.35, pregTalkAfterDays: 3,
     textDC: 11, textReward: 4,
     partyInviteChance: 0.3, partyVibe: 2, partyLoud: 3, partyDrinkLibido: 14, overDrinkAt: 3,
     danceFail: { romance: -6, affection: -3 },
