@@ -133,6 +133,11 @@ h2 {
   color: var(--muted);
   margin: 2px 0 6px;
 }
+.person-cloth {
+  font-size: 0.78rem;
+  color: #d98ec0;
+  margin: -3px 0 6px;
+}
 .bar {
   height: 6px;
   background: #181425;

@@ -115,6 +115,8 @@
       const marks = `${m.number ? " ☎" : ""}${m.dates ? ` 💞${m.dates}` : ""}${m.kiss ? " 💋" : ""}${pg ? (pg.status === "together" ? " 👶" : " 🤰") : ""}`;
       card.appendChild(el("div", "person-name", `${c.emoji} ${c.name}${marks}`));
       card.appendChild(el("div", "person-stage", `${stageFor(comp)} · Interest ${comp}`));
+      const cs = clothStatus(id);
+      if (cs) card.appendChild(el("div", "person-cloth", `👗 ${cs}`));
       const bars = el("div", "barset");
       for (const b of D.BARS) {
         const v = barVal(id, b), row = el("div", "barrow");
@@ -518,7 +520,7 @@
       o.appendChild(button(`${loc.emoji} ${loc.name}  (${tag})`, () => startDate(id, lid), "choice"));
     }
     for (const [lid, loc] of Object.entries(D.LOCATIONS)) {
-      if (!loc.overlookSpot) continue;
+      if (!loc.overlookSpot && !loc.beachSpot) continue;
       const tag = loc.dateCost ? `~$${loc.dateCost}` : "free";
       o.appendChild(button(`${loc.emoji} ${loc.name}  (${tag})`, () => startDate(id, lid), "choice move"));
     }
@@ -530,6 +532,7 @@
     state.date.venue = loc;
     if (loc === "home") return startHome();
     if (loc === "overlook") return startOverlook();
+    if (loc === "beach") return startBeach();
     state.date.beat = 0; state.date.picks = [];
     renderDateBeat();
   }
@@ -594,7 +597,8 @@
     const venues = Object.entries(D.LOCATIONS).filter(([lid, loc]) => D.DATE_SCENES[lid] && loc.dateSpot && !dt.used.includes(lid));
     const homeOK = D.HOME && !dt.used.includes("home") && rom >= T.homeContinueMinRomance;
     const overlookOK = D.OVERLOOK && !dt.used.includes("overlook");
-    if (!canMore || (!venues.length && !homeOK && !overlookOK)) return renderDateEnd();
+    const beachOK = D.BEACH && !dt.used.includes("beach");
+    if (!canMore || (!venues.length && !homeOK && !overlookOK && !beachOK)) return renderDateEnd();
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", "The night's still young"));
@@ -602,6 +606,7 @@
     const o = el("div", "choices");
     for (const [lid, loc] of venues) o.appendChild(button(`\"Come on — ${loc.name}.\"  (${loc.dateCost ? "~$" + loc.dateCost : "free"})`, () => startDate(dt.id, lid), "choice"));
     if (overlookOK) o.appendChild(button(`\"Drive up to the overlook with me.\"  (${D.LOCATIONS.overlook.dateCost ? "~$" + D.LOCATIONS.overlook.dateCost : "free"})`, () => startDate(dt.id, "overlook"), "choice move"));
+    if (beachOK) o.appendChild(button(`\"Let's go down to the beach.\"  (${D.LOCATIONS.beach.dateCost ? "~$" + D.LOCATIONS.beach.dateCost : "free"})`, () => startDate(dt.id, "beach"), "choice move"));
     if (homeOK) o.appendChild(button(`\"…my place?\"  (${D.LOCATIONS.home.dateCost ? "~$" + D.LOCATIONS.home.dateCost : "free"})`, () => startDate(dt.id, "home"), "choice move"));
     o.appendChild(button("Wind it down here", renderDateEnd, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
@@ -631,16 +636,16 @@
     state.date = null;
     renderResult({
       title: dt.bestQ > 1 ? "An unforgettable night" : dt.bestQ > 0 ? "A good night" : "That was a slog",
-      lines: [endLine, `${venues}.`, `Total: Romance ${dt.totRom + er >= 0 ? "+" : ""}${dt.totRom + er} · Affection ${dt.totAff + ea >= 0 ? "+" : ""}${dt.totAff + ea} · $${dt.spent} spent.`, (dt.used.includes("home") || dt.used.includes("overlook")) ? "Some of the night you keep to yourself." : null].filter(Boolean),
+      lines: [endLine, `${venues}.`, `Total: Romance ${dt.totRom + er >= 0 ? "+" : ""}${dt.totRom + er} · Affection ${dt.totAff + ea >= 0 ? "+" : ""}${dt.totAff + ea} · $${dt.spent} spent.`, (dt.used.includes("home") || dt.used.includes("overlook") || dt.used.includes("beach")) ? "Some of the night you keep to yourself." : null].filter(Boolean),
       tone: dt.bestQ > 0 ? "good" : "neutral", then: () => { state.metCount[id] += 1; advancePhase(); },
     });
   }
 
   // ---------- home / overlook date: deep, explorable ----------
   const subN = (s, name) => String(s).replace(/\{n\}/g, name);
-  function placeDef() { return state.date && state.date.place === "overlook" ? D.OVERLOOK : D.HOME; }
-  function placeIcon() { return state.date && state.date.place === "overlook" ? "🌃" : "🏠"; }
-  function placeName() { return state.date && state.date.place === "overlook" ? "Overlook" : "Home"; }
+  function placeDef() { const p = state.date && state.date.place; return p === "overlook" ? D.OVERLOOK : p === "beach" ? D.BEACH : D.HOME; }
+  function placeIcon() { const p = state.date && state.date.place; return p === "overlook" ? "🌃" : p === "beach" ? "🏖️" : "🏠"; }
+  function placeName() { const p = state.date && state.date.place; return p === "overlook" ? "Overlook" : p === "beach" ? "Beach" : "Home"; }
   function bedroomUnlocked() {
     const dt = state.date, g = placeDef().bedroomGate;
     if (!g) return true;
@@ -648,6 +653,7 @@
   }
   function startHome() { startPlace("home"); }
   function startOverlook() { startPlace("overlook"); }
+  function startBeach() { startPlace("beach"); }
   function startPlace(place) {
     const dt = state.date, c = D.CHARACTERS[dt.id];
     dt.place = place;
@@ -661,7 +667,7 @@
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `${placeIcon()} ${placeName()} · with ${c.name}`));
     w.appendChild(el("p", "char-line", subN(placeDef().intro, c.name)));
-    w.appendChild(button(place === "overlook" ? "Take it in" : "Show her in", renderHomeRooms, "primary"));
+    w.appendChild(button(place === "overlook" ? "Take it in" : place === "beach" ? "Down to the sand" : "Show her in", renderHomeRooms, "primary"));
     screen().appendChild(w);
   }
   function renderHomeRooms() {
@@ -735,11 +741,20 @@
     const roll = d20(), total = roll + gauge;
     return { ok: roll !== 1 && (roll === 20 || total >= dc), roll, gauge, total, dc };
   }
+  // A node can ask for a flat stat check (e.g. INT for constellations)
+  // instead of the usual read of her — node.roll.stat names the stat.
+  function nodeRoll(node, id) {
+    if (node.roll.stat) {
+      const sv = effStat(node.roll.stat), roll = d20(), dc = node.roll.dc, total = roll + sv;
+      return { ok: roll !== 1 && (roll === 20 || total >= dc), roll, gauge: sv, total, dc, statLbl: D.STAT_SHORT[node.roll.stat] || node.roll.stat };
+    }
+    return homeRoll(id, node.roll.dc);
+  }
   function homeResolveNode(node, back) {
     const dt = state.date, id = dt.id, c = D.CHARACTERS[id];
     if (node.roll) {
-      const r = homeRoll(id, node.roll.dc), br = r.ok ? node.roll.win : node.roll.lose;
-      const roll = { d20: r.roll, stat: `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
+      const r = nodeRoll(node, id), br = r.ok ? node.roll.win : node.roll.lose;
+      const roll = { d20: r.roll, stat: r.statLbl ? `${r.statLbl} ${r.gauge}` : `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
       if (!r.ok && br.hard) return homeBail(br, roll);
       if (r.ok && br.sex) return renderSexChoice(back);
       homeAccrue(br.fx || {});
@@ -836,13 +851,26 @@
   // carries across every room/activity for the rest of the night.
   function attireState() {
     const h = state.date && state.date.home; if (!h) return "dressed";
-    if (h.attire === "bare") return "bare";
+    if (h.attire === "bare" || h.un.panties) return "bare";
     if (h.attire === "towel") return "towel";
     if (h.un.pants || (h.un.bra && h.un.shirt)) return "stripped";
     if (h.un.shirt) return "topless";
     if (h.attire === "underwear") return "underwear";
     if (h.attire === "suit") return "suit";
     return "dressed";
+  }
+  // Short clothing label for the HUD card — only when there's something
+  // to say (active date with her, or a party strip dare in play).
+  function clothStatus(id) {
+    if (state.date && state.date.id === id && state.date.home) {
+      const m = { bare: "naked", towel: "in just a towel", underwear: "down to underwear", suit: "in a swimsuit", topless: "topless", stripped: "half-undressed" };
+      return m[attireState()] || null;
+    }
+    if (state.partyRun && typeof stripLvl === "function") {
+      const l = stripLvl(id);
+      if (l) return l >= 3 ? "down to nothing" : l === 2 ? "down to almost nothing" : "a layer down";
+    }
+    return null;
   }
   // Undress steps are state-aware: removed garments and the whole branch
   // (once she's bare, or post-swim) stop being offered. Fixes "still able
@@ -857,7 +885,9 @@
       case "bra": return !post && un.shirt && !un.bra;
       case "chest": return !post && un.bra && !un.pants;
       case "pants": return !post && !un.pants;
-      case "rest": return a !== "bare";
+      case "panties": return !post && un.pants && !un.panties;
+      case "rest": return !!un.panties;
+      case "bareall": return a === "bare";
       default: return true;
     }
   }
@@ -897,8 +927,8 @@
   }
   function homeResolveInto(child, roomIdx, path, i) {
     const dt = state.date, id = dt.id, c = D.CHARACTERS[id];
-    const r = homeRoll(id, child.roll.dc), br = r.ok ? child.roll.win : child.roll.lose;
-    const roll = { d20: r.roll, stat: `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
+    const r = nodeRoll(child, id), br = r.ok ? child.roll.win : child.roll.lose;
+    const roll = { d20: r.roll, stat: r.statLbl ? `${r.statLbl} ${r.gauge}` : `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
     if (!r.ok && br.hard) return homeBail(br, roll);
     homeAccrue(br.fx || {});
     if (r.ok) return renderResult({ title: "She's with you", roll, lines: (br.lines || []).map((l) => subN(l, c.name)), tone: "good", then: () => renderHomeMenu(roomIdx, path.concat(i)), thenLabel: "…go on" });

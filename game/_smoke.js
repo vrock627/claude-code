@@ -190,6 +190,68 @@ const ovLoc = D.LOCATIONS.overlook;
 check(ovLoc && ovLoc.overlookSpot && typeof ovLoc.dateCost === "number", "overlook LOCATION needs overlookSpot + dateCost");
 check(!ovLoc.dateSpot, "overlook must NOT be a DATE_SCENES dateSpot (it's the nested tree)");
 
+// Photoshoot is a long slow-burn: many nested escalating roll beats.
+(function () {
+  let shoot = null;
+  (function find(ns) { for (const n of ns || []) { if (/real shoot/i.test(n.label || "")) shoot = n; if (n.sub) find(n.sub); if (n.actions) find(n.actions); } })(D.OVERLOOK.rooms);
+  check(shoot && shoot.sub, "overlook needs the 'make it a real shoot' chain");
+  let deep = 0, rolls = 0;
+  (function w(ns, d) { deep = Math.max(deep, d); for (const n of ns || []) { if (n.roll) rolls++; if (n.sub) w(n.sub, d + 1); } })(shoot.sub, 1);
+  check(deep >= 5, `photoshoot must be a long chain; got depth ${deep}`);
+  check(rolls >= 5, `photoshoot must have lots of rolls; got ${rolls}`);
+  const flat = JSON.stringify(shoot);
+  check(/hand me the camera|turns it on you/i.test(flat), "once nude she must offer to shoot you");
+  check(/Let it all hang out/i.test(flat) && /Cover up/i.test(flat) && /Refuse/i.test(flat), "her-shooting-you needs let-it-hang/cover/refuse");
+  check(/both of us|together/i.test(flat), "needs a suggestive both-of-you option");
+})();
+
+// Beach date — nested like the overlook; shore + rentable boat.
+check(D.BEACH && D.BEACH.intro.includes("{n}"), "BEACH.intro must address her ({n})");
+const beRoomKeys = D.BEACH.rooms.map((r) => r.key);
+for (const need of ["shore", "boat"]) check(beRoomKeys.includes(need), `BEACH missing room ${need}`);
+let beDepth = 0, beSex = false, beKiss = false;
+(function walkBe(nodes, depth) {
+  beDepth = Math.max(beDepth, depth);
+  for (const n of nodes || []) {
+    check(n.rooms || n.back || n.label, "BEACH node needs a label/nav");
+    if (n.gate) check(n.gate.inti > 0 || n.gate.rom > 0 || n.gate.lib > 0, `BEACH gate empty: ${n.label}`);
+    if (n.sub) { check(n.sub.length >= 2, `BEACH sub too small: ${n.label}`); walkBe(n.sub, depth + 1); }
+    if (n.roll) {
+      check(n.roll.dc > 0 && n.roll.win && n.roll.lose, `BEACH roll malformed: ${n.label}`);
+      if (n.roll.win.sex) beSex = true; else check(n.roll.win.lines && n.roll.win.lines.length, `BEACH roll win no lines: ${n.label}`);
+      check(n.roll.lose.hard || (n.roll.lose.lines && n.roll.lose.lines.length), `BEACH roll lose no lines: ${n.label}`);
+      if (n.roll.win.kiss || (n.roll.win.fx && n.roll.win.fx.kiss)) beKiss = true;
+    }
+    if (!n.sub && !n.roll && !n.rooms && !n.back) check(n.lines && n.lines.length, `BEACH terminal no lines: ${n.label}`);
+  }
+})(D.BEACH.rooms.flatMap((r) => r.actions), 0);
+check(beDepth >= 3, `BEACH needs deep nesting; got ${beDepth}`);
+check(beSex && beKiss, "BEACH needs a sex route and a kiss payoff");
+const bsx = D.BEACH.sex;
+check(bsx && bsx.ask && bsx.condom && bsx.raw && bsx.back && bsx.raw.lose.hard, "BEACH.sex malformed");
+check(D.BEACH.rooms.every((r) => r.actions.some((a) => a.rooms)), "every beach room needs a nav out");
+check(D.BEACH.rooms.some((r) => r.actions.some((a) => /boat/i.test(a.label))), "beach needs a rent-a-boat option");
+const beLoc = D.LOCATIONS.beach;
+check(beLoc && beLoc.beachSpot && typeof beLoc.dateCost === "number" && !beLoc.dateSpot, "beach LOCATION needs beachSpot + dateCost, not a DATE_SCENE");
+
+// Undress chain gained a discrete panties step + a bare shortcut.
+(function () {
+  let begin = null;
+  (function find(ns) { for (const n of ns || []) { if (n.ustep === "begin") begin = n; if (n.sub) find(n.sub); if (n.actions) find(n.actions); } })(D.HOME.rooms);
+  const steps = begin.sub.map((s) => s.ustep);
+  check(steps.includes("panties"), "undress needs a discrete 'panties' step (no auto-all-the-way)");
+  const pan = begin.sub.find((s) => s.ustep === "panties");
+  check(pan.roll && pan.roll.win && !pan.roll.win.sex && pan.roll.win.fx && pan.roll.win.fx.un === "panties", "panties step must remove underwear WITHOUT going all the way");
+})();
+let sawBareAll = false;
+(function find(ns) { for (const n of ns || []) { if (n.ustep === "bareall") sawBareAll = true; if (n.sub) find(n.sub); if (n.actions) find(n.actions); } })(D.HOME.rooms);
+check(sawBareAll, "couch needs a 'she's already naked → all the way' path (home date can lead to couch sex when bare)");
+// Massage tree gained an explicit option; stars gained an INT check.
+check(JSON.stringify(D.HOME).includes("between her legs"), "massage tree needs the explicit option");
+let sawStatRoll = false;
+(function find(ns) { for (const n of ns || []) { if (n.roll && n.roll.stat) sawStatRoll = true; if (n.sub) find(n.sub); if (n.actions) find(n.actions); } })(D.HOME.rooms);
+check(sawStatRoll, "stars should offer a stat (INT) roll");
+
 // Party rooms, male NPCs, strip dares, body shots, room hookups.
 check(Array.isArray(D.PARTY.rooms) && D.PARTY.rooms.length >= 3, "PARTY needs rooms");
 check(D.PARTY.rooms[0].key === "main", "first party room should be 'main'");
