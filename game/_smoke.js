@@ -144,7 +144,18 @@ check(D.HOME.swim && D.HOME.swim.hasSuit && D.HOME.swim.noSuit.length >= 3, "HOM
 check(D.HOME.swim.noSuit.some((o) => o.roll && o.roll.lose.hard), "skinny-dip should carry a real risk");
 check(D.HOME.rooms.every((r) => r.actions.some((a) => a.rooms)), "every room needs a 'go somewhere else'");
 check(D.PARTY.kissDare && typeof D.PARTY.kissDare === "string", "PARTY.kissDare prompt missing");
-for (const b of D.PARTY.guestBeats.concat(D.PARTY.spicyGuestBeats)) check(b.length > 40, `guest beat too vague: ${b}`);
+for (const b of D.PARTY.guestBeats.concat(D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats)) check(b.length > 40 && b.includes("{n}"), `guest beat too vague: ${b}`);
+check(D.PARTY.scorchingTruths.length && D.PARTY.scorchingDares.length && D.PARTY.scorchingGuestBeats.length, "scorching pools empty");
+check(D.PARTY.privateScene && D.PARTY.privateScene.esc.length >= 2 && D.PARTY.privateScene.win.length, "PARTY.privateScene needs esc options + win lines");
+for (const e of D.PARTY.privateScene.esc) check(e.label && typeof e.mod === "number" && e.line, `privateScene esc malformed: ${e.label}`);
+
+// Shared intimacy beats (non-graphic): >=2 beats + a close, all with fx + line.
+check(D.INTIMACY && D.INTIMACY.beats.length >= 2 && D.INTIMACY.close, "INTIMACY needs beats + close");
+for (const node of D.INTIMACY.beats.concat([D.INTIMACY.close])) {
+  check(node.q && node.opts.length >= 2, `INTIMACY node malformed: ${node.q}`);
+  for (const op of node.opts) check(op.label && op.line && op.fx && typeof op.fx === "object", `INTIMACY opt malformed: ${op.label}`);
+}
+check(D.INTIMACY.close.opts.some((o) => o.tone), "INTIMACY close should set a tone");
 
 // Date-ending dialogue.
 check(Array.isArray(D.DATE_END) && D.DATE_END.length >= 2, "DATE_END missing");

@@ -791,18 +791,53 @@
   function sexResolve(kind, back) {
     const dt = state.date, id = dt.id, c = D.CHARACTERS[id], sx = D.HOME.sex;
     if (kind === "back") { homeAccrue(sx.back.fx); return renderResult({ title: "Not tonight, the rest", lines: sx.back.lines.map((l) => subN(l, c.name)), tone: "good", then: back, thenLabel: "Back" }); }
-    if (kind === "condom") { state.inventory.condom -= 1; homeAccrue(sx.condom.fx); return sexFinish(sx.condom.lines, null); }
+    if (kind === "condom") { state.inventory.condom -= 1; homeAccrue(sx.condom.fx); return renderIntimacy(id, sx.condom.lines, renderDateEnd); }
     const ta = c.traitAffinity;
     const mod = Math.floor(barVal(id, "libido") / 12) + ((ta.adventurous || 0) > 0 ? 2 : 0) - ((ta.classy || 0) > 0 ? 2 : 0) - ((ta.sincere || 0) > 0 ? 1 : 0);
     const r = homeRoll(id, sx.raw.dc - mod);
     const roll = { d20: r.roll, stat: `read ${r.gauge} · her ${mod >= 0 ? "+" : ""}${mod}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
     if (!r.ok) return homeBail(sx.raw.lose, roll);
     homeAccrue(sx.raw.win.fx);
-    sexFinish(sx.raw.win.lines, roll);
+    renderIntimacy(id, sx.raw.win.lines, renderDateEnd);
   }
-  function sexFinish(lines, roll) {
-    const c = D.CHARACTERS[state.date.id];
-    renderResult({ title: "The rest of the night", roll: roll || null, lines: lines.map((l) => subN(l, c.name)), tone: "good", then: renderDateEnd, thenLabel: "…after" });
+  // ---- shared, non-graphic intimacy beats (home date + party slip-away) ----
+  function intimFx(id, fx) {
+    if (fx.rom) adjustBar(id, "romance", fx.rom);
+    if (fx.aff) adjustBar(id, "affection", fx.aff);
+    if (fx.lib) adjustBar(id, "libido", fx.lib);
+    if (fx.atr) adjustBar(id, "attraction", fx.atr);
+    if (!state.milestones[id].kiss) state.milestones[id].kiss = true;
+    if (state.date && state.date.home) {
+      const dt = state.date;
+      dt.totRom += fx.rom || 0; dt.totAff += fx.aff || 0;
+      if (fx.inti) dt.home.inti += fx.inti;
+      dt.bestQ = Math.max(dt.bestQ, (fx.rom || 0) / 4 + (fx.inti ? fx.inti * 0.4 : 0) + 1);
+    }
+  }
+  function renderIntimacy(id, introLines, afterFn) {
+    state.intim = { id, beat: 0, after: afterFn, log: (introLines || []).slice(), closeTone: "good" };
+    renderIntimacyBeat();
+  }
+  function renderIntimacyBeat() {
+    const im = state.intim, c = D.CHARACTERS[im.id], beats = D.INTIMACY.beats;
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `The rest of the night · ${c.name}`));
+    for (const l of im.log.slice(-2)) w.appendChild(el("p", "char-line", subN(l, c.name)));
+    const node = im.beat < beats.length ? beats[im.beat] : D.INTIMACY.close;
+    w.appendChild(el("p", "talk-prompt", node.q));
+    const o = el("div", "choices");
+    node.opts.forEach((opt) => o.appendChild(button(opt.label, () => {
+      intimFx(im.id, opt.fx); im.log.push(opt.line);
+      if (im.beat < beats.length) { im.beat += 1; renderIntimacyBeat(); }
+      else { im.closeTone = opt.tone || "good"; finishIntimacy(); }
+    }, "choice")));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function finishIntimacy() {
+    const im = state.intim, c = D.CHARACTERS[im.id], after = im.after, tone = im.closeTone;
+    state.intim = null;
+    renderResult({ title: "…and the rest of the night", lines: im.log.slice(-3).map((l) => subN(l, c.name)).concat(["Some of it stays exactly where it happened."]), tone, then: after || advancePhase, thenLabel: "…after" });
   }
 
   // ---------- party ----------
@@ -895,29 +930,41 @@
     w.appendChild(el("div", "talk-head", `Just the two of you`));
     w.appendChild(el("p", "char-line", `You catch ${c.name}'s eye and tilt your head toward the quiet of the hallway. She holds the look a second — then follows. The noise drops behind a closed door.`));
     const o = el("div", "choices");
-    o.appendChild(button("\"I've been wanting you to myself all night.\" (bold)", () => resolvePrivate(id, "bold"), "choice move"));
-    o.appendChild(button("\"…is this okay?\" (let her decide the pace)", () => resolvePrivate(id, "tender"), "choice"));
+    o.appendChild(button("\"I've been wanting you to myself all night.\" (bold)", () => renderPrivateEsc(id, "bold"), "choice move"));
+    o.appendChild(button("\"…is this okay?\" (let her set the pace)", () => renderPrivateEsc(id, "tender"), "choice"));
     o.appendChild(button("Lose your nerve, head back", renderParty, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
   }
-  function resolvePrivate(id, approach) {
+  function renderPrivateEsc(id, approach) {
+    renderHud(); clearScreen();
+    const c = D.CHARACTERS[id], w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `Just the two of you · ${c.name}`));
+    w.appendChild(el("p", "char-line", approach === "bold" ? `She huffs a laugh against your jaw. "Took you long enough." Then she's not laughing.` : `"…yeah," ${c.name} says, quiet, already closer than the word needed her to be.`));
+    const o = el("div", "choices");
+    D.PARTY.privateScene.esc.forEach((e) => o.appendChild(button(e.label, () => resolvePrivate(id, approach, e), "choice")));
+    o.appendChild(button("Actually — not here, not now", () => { adjustBar(id, "affection", 1); renderResult({ title: "Pulled back", lines: [`You ease off. ${c.name} exhales, half relieved, and squeezes your hand on the way back in. Affection +1.`], tone: "good", then: partyAfter }); }, "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function resolvePrivate(id, approach, esc) {
     const c = D.CHARACTERS[id], roll = d20();
     const gauge = Math.floor(recept(id) / 6) + Math.floor(barVal(id, "libido") / 8) + Math.floor(barVal(id, "romance") / 12);
     const dc = approach === "bold" ? 15 : 12; // tender is safer, bold higher ceiling
-    const total = roll + gauge + (approach === "bold" ? 0 : 2);
+    const total = roll + gauge + (approach === "bold" ? 0 : 2) + esc.mod;
     const ok = roll !== 1 && (roll === 20 || total >= dc);
     if (ok) {
       adjustBar(id, "romance", T.privateReward.romance + (approach === "bold" ? 3 : 0));
       adjustBar(id, "libido", T.privateReward.libido); adjustBar(id, "attraction", T.privateReward.attractionEvent);
-      if (!state.milestones[id].kiss) state.milestones[id].kiss = true;
-      renderResult({ title: "Behind a closed door", roll: { d20: roll, stat: `read ${gauge}`, vibe: 0, vibeNote: "", total, dc },
-        lines: [`${c.name} answers by pulling you in. It gets quiet, and close, and unhurried — and the party stops existing for a while.`, "Some of the night stays between the two of you.", `Romance way up · Libido way up`], tone: "good", then: partyAfter });
+      renderIntimacy(id, [esc.line].concat(D.PARTY.privateScene.win), () => privateAfter(id));
     } else {
       adjustBar(id, "romance", T.privateFail.romance); adjustBar(id, "affection", T.privateFail.affection);
       state.party.guests = state.party.guests.filter((g) => g !== id);
       renderResult({ title: "Misread", roll: { d20: roll, stat: `read ${gauge}`, vibe: 0, vibeNote: "", total, dc },
         lines: [`${c.name} stops you, gentle but unmistakable. "Hey — no. Not this." She slips back into the noise without looking back, and you don't see her again tonight.`, `Romance ${T.privateFail.romance} · Affection ${T.privateFail.affection}`], tone: "bad", then: partyAfter });
     }
+  }
+  function privateAfter(id) {
+    const c = D.CHARACTERS[id];
+    renderResult({ title: "Back to the noise — eventually", lines: [`You drift back in separately, like that fools anyone. ${c.name} catches your eye across the room once and very deliberately looks away.`], tone: "good", then: partyAfter });
   }
 
   // ----- party games (random, multi-round, everyone narrated) -----
@@ -926,12 +973,21 @@
     state.pg = { game: g, round: 0, partner: null, made: 0, opp: 0 };
     nextGameRound();
   }
+  function partyTier(id) {
+    if (flowIndex() < 2) return "plain";
+    const hot = (state.partyRun && state.partyRun.drinks >= 2) || (id && (composite(id) >= 50 || barVal(id, "libido") >= 60));
+    return hot ? "scorch" : "spicy";
+  }
+  function tierPool(tier, plain, spicy, scorch) {
+    return tier === "scorch" ? scorch : tier === "spicy" ? spicy : plain;
+  }
   function guestNarration(spicyOK) {
     const guests = partyGuests();
     return guests.map((id) => {
       const c = D.CHARACTERS[id];
-      const spicy = spicyOK && (barVal(id, "libido") >= 55 || (c.traitAffinity.adventurous || 0) >= 2 || (c.traitAffinity.independent || 0) >= 2) && Math.random() < 0.6;
-      const pool = spicy ? D.PARTY.spicyGuestBeats : D.PARTY.guestBeats;
+      let tier = spicyOK ? partyTier(id) : "plain";
+      if (tier !== "plain" && Math.random() < 0.4) tier = "plain"; // keep variety
+      const pool = tierPool(tier, D.PARTY.guestBeats, D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats);
       return one(pool).replace(/\{n\}/g, c.name);
     });
   }
@@ -959,32 +1015,58 @@
     const upYou = Math.random() < 0.5 || !guests.length;
     const narr = guestNarration(spicyOK);
     if (upYou) {
-      gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, narr, "The bottle stops on you. The circle leans in.", [
-        ["Truth", () => tdYou("truth", spicyOK)], ["Dare", () => tdYou("dare", spicyOK)],
+      const tier = spicyOK ? partyTier(null) : "plain";
+      gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, narr, tier === "scorch" ? "The bottle stops on you. The circle goes feral." : "The bottle stops on you. The circle leans in.", [
+        ["Truth", () => tdYou("truth", tier)], ["Dare", () => tdYou("dare", tier)],
       ]);
     } else {
       const who = one(guests), c = D.CHARACTERS[who];
-      const spicy = spicyOK && (barVal(who, "libido") >= 55 || (c.traitAffinity.adventurous || 0) >= 2);
-      const beat = one(spicy ? D.PARTY.spicyGuestBeats : D.PARTY.guestBeats).replace(/\{n\}/g, c.name);
+      const tier = spicyOK ? partyTier(who) : "plain";
+      const beat = one(tierPool(tier, D.PARTY.guestBeats, D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats)).replace(/\{n\}/g, c.name);
       const others = narr.filter((l) => l.indexOf(c.name) !== 0);
-      gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, others, `${beat}${spicy ? " She glances at you doing it." : ""}  ·  What do you do?`, [
-        ["Cheer her on, loudest in the room", () => { adjustBar(who, "romance", spicy ? 5 : 3); adjustBar(who, "libido", spicy ? 4 : 1); afterGameRound(`You're the loudest one clapping. ${c.name} plays the whole bit straight to you, and makes sure you know it. Romance +${spicy ? 5 : 3}${spicy ? " · Libido +4" : ""}.`); }],
+      const big = tier === "scorch";
+      gameShell(`🎲 Truth or Dare · round ${pg.round}/${D.PARTY.gameRounds}`, others, `${beat}${tier !== "plain" ? " She catches your eye doing it." : ""}  ·  What do you do?`, [
+        ["Cheer her on, loudest in the room", () => { adjustBar(who, "romance", big ? 7 : tier === "spicy" ? 5 : 3); adjustBar(who, "libido", big ? 7 : tier === "spicy" ? 4 : 1); afterGameRound(`You're the loudest one clapping. ${c.name} plays the whole bit straight to you and makes very sure you know it. Romance +${big ? 7 : tier === "spicy" ? 5 : 3}${tier !== "plain" ? ` · Libido +${big ? 7 : 4}` : ""}.`); }],
         ["Stay unreadable", () => { adjustBar(who, "romance", 1); afterGameRound(`You give her absolutely nothing. ${c.name} pushes the bit twice as hard just to crack your face — and clocks, annoyed, that it didn't work. Romance +1.`); }],
       ]);
     }
   }
-  function tdYou(kind, spicyOK) {
+  function tdYou(kind, tier) {
     const guests = partyGuests(), focus = guests.length ? one(guests) : null;
-    const pool = kind === "truth" ? (spicyOK ? D.PARTY.spicyTruths : D.PARTY.truths) : (spicyOK ? D.PARTY.spicyDares : D.PARTY.dares);
+    const pool = kind === "truth"
+      ? tierPool(tier, D.PARTY.truths, D.PARTY.spicyTruths, D.PARTY.scorchingTruths)
+      : tierPool(tier, D.PARTY.dares, D.PARTY.spicyDares, D.PARTY.scorchingDares);
     const prompt = one(pool);
     let buttons;
     if (kind === "truth")
       buttons = [["Answer honestly", () => tdYouResolve(focus, "sincere", true)], ["Spin it into a joke", () => tdYouResolve(focus, "playful", false)], ["Dodge it", () => tdYouResolve(focus, "independent", false)]];
     else {
-      buttons = [["Go all in", () => tdYouResolve(focus, "adventurous", true)], ["Tame version", () => tdYouResolve(focus, "classy", false)], ["Chicken out", () => tdYouResolve(focus, "__chk", false)]];
-      if (spicyOK && guests.length) buttons.unshift([`💋 ${D.PARTY.kissDare}`, renderPartyKissPick]);
+      const allIn = tier !== "plain" && guests.length
+        ? ["Go all in — pick who", () => renderDareFollow(tier)]
+        : ["Go all in", () => tdYouResolve(focus, "adventurous", true)];
+      buttons = [allIn, ["Tame version", () => tdYouResolve(focus, "classy", false)], ["Chicken out", () => tdYouResolve(focus, "__chk", false)]];
+      if (tier !== "plain" && guests.length) buttons.unshift([`💋 ${D.PARTY.kissDare}`, renderPartyKissPick]);
     }
-    gameShell(`🎲 Your ${kind}`, [], `"${prompt}"`, buttons);
+    gameShell(`🎲 Your ${kind}${tier === "scorch" ? " (no mercy)" : ""}`, [], `"${prompt}"`, buttons);
+  }
+  function renderDareFollow(tier) {
+    const guests = partyGuests();
+    gameShell(`🔥 Your dare — your call`, [], "Whole circle's watching. Who's it on?",
+      guests.map((id) => [`${D.CHARACTERS[id].emoji} ${D.CHARACTERS[id].name}`, () => resolveDareTarget(id, tier)])
+        .concat([["Bottle it (forfeit)", () => afterGameRound("You stall and the circle boos you into next round. (Forfeit.)", "neutral")]]));
+  }
+  function resolveDareTarget(id, tier) {
+    const c = D.CHARACTERS[id], big = tier === "scorch";
+    const roll = d20(), gauge = Math.floor(composite(id) / 8) + Math.floor(barVal(id, "libido") / 9);
+    const ok = roll !== 1 && (roll === 20 || roll + gauge + T.partyVibe >= (big ? 14 : 12));
+    if (ok) {
+      const rm = big ? 14 : 9, lb = big ? 12 : 7;
+      adjustBar(id, "romance", rm); adjustBar(id, "libido", lb); adjustBar(id, "attraction", big ? 3 : 1);
+      afterGameRound(`${c.name} doesn't flinch — she leans all the way into it and plays it back at you twice as hard. The circle absolutely loses it. Romance +${rm} · Libido +${lb}.`, "good", { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party heat", total: roll + gauge + T.partyVibe, dc: big ? 14 : 12 });
+    } else {
+      adjustBar(id, "romance", -4); adjustBar(id, "affection", -3);
+      afterGameRound(`${c.name} calls your bluff with a flat "…no," and the circle's "ooooh" curdles into a wince. Romance −4 · Affection −3.`, "bad", { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party heat", total: roll + gauge + T.partyVibe, dc: big ? 14 : 12 });
+    }
   }
   function renderPartyKissPick() {
     const guests = partyGuests();

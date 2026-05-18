@@ -272,7 +272,57 @@
       "{n}'s truth is 'who's the best kisser you know' — she answers with a name, won't elaborate, and sips her drink while the interrogation fails.",
       "{n} gets dared to slow-dance with someone for a full minute with no music; she makes it weirdly tender and the room doesn't know whether to laugh or look away.",
     ],
+    // Highest tier — only when the night's momentum has truly tipped.
+    scorchingTruths: [
+      "Describe the best night you've ever had — no names, every other detail.",
+      "Who in this room have you actually pictured, and what were they doing?",
+      "What's the most reckless thing you'd do tonight if no one remembered it tomorrow?",
+    ],
+    scorchingDares: [
+      "Two minutes in the hall with whoever the circle picks.",
+      "Tell the hottest person here exactly what you noticed about them — to their face.",
+      "Demonstrate your single best move on a willing volunteer.",
+    ],
+    scorchingGuestBeats: [
+      "{n} takes the two-minutes-in-the-hall dare, picks someone with zero hesitation, and comes back flushed and re-buttoning, stonewalling every single question.",
+      "{n} answers the 'who have you pictured' truth by walking across the circle, saying it directly into someone's ear, and walking back. The room detonates.",
+      "{n} loses a dare and spends the rest of the round draped across the arm of someone's chair like a verdict, running the game from up there.",
+      "{n} does the 'best move' dare for real, on a very willing volunteer, and the circle has to physically separate the cheering from the booing.",
+    ],
+    // Slip-away second beat (nested before the read).
+    privateScene: {
+      esc: [
+        { label: "Slow. Against the wall. In no rush at all.", mod: 1, line: "You take it slow enough that the noise on the other side of the door stops being a thing that exists." },
+        { label: "Don't make it anywhere in particular.", mod: 0, line: "Neither of you makes it more than two steps from where you started. Decor was not a priority." },
+        { label: "Find somewhere with an actual door that locks.", mod: 2, line: "You get her somewhere with a lock and a flat surface and a guarantee of being uninterrupted, which she clearly appreciates." },
+      ],
+      win: ["{n} answers by pulling you in, and the party stops existing for as long as you let it.", "Some of the night stays strictly between the two of you."],
+    },
     privateGateFlow: 2, privateGateInterest: 45,
+  };
+
+  // Shared, character-driven, non-graphic. Choices steer the outcome;
+  // the camera stays above the collarbone. Used by the home date and
+  // the party slip-away.
+  const INTIMACY = {
+    beats: [
+      { q: "How does it go?", opts: [
+        { label: "Slow. Unhurried. Make it last.", fx: { rom: 8, aff: 6, inti: 1 }, line: "You take it slow enough that every part of it registers — her breath, the pauses, the way she keeps saying your name like she's checking you're still there." },
+        { label: "Urgent — neither of you can wait.", fx: { lib: 10, atr: 5, rom: 4 }, line: "It's all heat and no patience: a mess of half-removed everything, one shared laugh, and then very much not laughing." },
+        { label: "Let her set the pace entirely.", fx: { rom: 7, aff: 7, lib: 3 }, line: "You hand her the tempo and she takes it with a certainty that quietly rearranges a few of your assumptions about her." } ] },
+      { q: "Who's running this?", opts: [
+        { label: "Take the lead.", fx: { atr: 6, lib: 6, rom: 3 }, line: "You take charge; she lets you, watching your face the whole time like she's filing every second of it away." },
+        { label: "Let her take over.", fx: { rom: 6, lib: 7, aff: 3 }, line: "You give it up to her and she does not hesitate to take it. It is not a thing you'll be forgetting." },
+        { label: "Trade it back and forth.", fx: { rom: 7, aff: 5, lib: 4 }, line: "It keeps changing hands — a push, an answer, a quiet contest neither of you is actually trying to win." } ] },
+      { q: "And underneath all of it —", opts: [
+        { label: "Keep it tender. Stay close.", fx: { rom: 9, aff: 8 }, line: "You keep your forehead to hers and it stays unbearably close the whole way through — more sincere than you meant to be, and not sorry about it." },
+        { label: "Let it get intense.", fx: { lib: 9, atr: 7, rom: 3 }, line: "It stops being careful somewhere in the middle, and neither of you is performing a single thing by the end." },
+        { label: "Make her laugh, then mean it.", fx: { aff: 8, rom: 6, lib: 3 }, line: "You crack a joke at precisely the wrong moment; she laughs, swats you, and then the laugh turns into something with no jokes left in it at all." } ] },
+    ],
+    close: { q: "After —", opts: [
+      { label: "Stay tangled up, talk till it's late.", fx: { rom: 10, aff: 10 }, line: "Neither of you sleeps for a while. You just talk in the dark — the good kind, the kind that's its own entire thing.", tone: "good" },
+      { label: "Both of you pass out instantly.", fx: { aff: 6, rom: 4 }, line: "You get about ninety seconds of intending to talk before you're both gone, her hand still flat on your chest.", tone: "good" },
+      { label: "She slips out before dawn.", fx: { atr: 4, rom: -3 }, line: "You wake to a cold half of the bed and a note: a phone number you already have, and a drawn smirk. Infuriating. Effective.", tone: "neutral" } ] },
   };
 
   // Deep, explorable home date. Rooms → activities → intimate sub-actions.
@@ -399,6 +449,6 @@
   window.GAMEDATA = {
     STATS, STAT_LABEL, STAT_SHORT, BARS, BAR_LABEL, BAR_SHORT, TRAITS,
     BACKGROUNDS, SAYS, MOVE, LINES, ITEMS, SHOPS, LOCATIONS, PHASES,
-    CHARACTERS, BILL, DATE_SCENES, DATE_END, HOME, PARTY, STAGES, TUNING,
+    CHARACTERS, BILL, DATE_SCENES, DATE_END, HOME, INTIMACY, PARTY, STAGES, TUNING,
   };
 })();
