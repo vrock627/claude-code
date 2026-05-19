@@ -14,13 +14,32 @@ const STYLE = new Set(D.SAYS.map((r) => r.style).concat([D.MOVE.style]));
 
 check(D, "GAMEDATA missing");
 
-// Backgrounds.
-for (const [id, bg] of Object.entries(D.BACKGROUNDS)) {
-  check(Object.keys(bg.stats).length === D.STATS.length, `${id}: stat count`);
-  for (const k of Object.keys(bg.stats)) check(STAT.has(k), `${id}: bad stat ${k}`);
-  const s = Object.values(bg.stats).reduce((a, b) => a + b, 0);
-  check(s === 18, `${id}: stat sum ${s} != 18`);
+// Backgrounds: 3 categories, sub-budgets sum to 18, every option's stats
+// sum to its category's sub. So ANY combination = 18, keeping the rest
+// of the economy/DC math anchored.
+check(!D.BACKGROUNDS, "old flat BACKGROUNDS should be gone");
+check(Array.isArray(D.BG_CATEGORIES) && D.BG_CATEGORIES.length >= 2, "BG_CATEGORIES missing or too short");
+let subTotal = 0;
+const catIds = new Set();
+for (const cat of D.BG_CATEGORIES) {
+  check(cat.id && !catIds.has(cat.id), `BG_CATEGORIES dup/missing id: ${cat.id}`);
+  catIds.add(cat.id);
+  check(typeof cat.sub === "number" && cat.sub > 0, `BG cat ${cat.id}: sub must be positive`);
+  subTotal += cat.sub;
+  check(Array.isArray(cat.opts) && cat.opts.length >= 2, `BG cat ${cat.id}: needs >=2 opts`);
+  const optIds = new Set();
+  for (const opt of cat.opts) {
+    check(opt.id && !optIds.has(opt.id), `BG ${cat.id}: dup/missing opt id`);
+    optIds.add(opt.id);
+    check(opt.name && opt.blurb && opt.emoji, `BG ${cat.id}/${opt.id}: missing meta`);
+    check(Object.keys(opt.stats).length === D.STATS.length, `BG ${cat.id}/${opt.id}: stat count`);
+    for (const k of Object.keys(opt.stats)) check(STAT.has(k), `BG ${cat.id}/${opt.id}: bad stat ${k}`);
+    const s = D.STATS.reduce((a, k) => a + (opt.stats[k] || 0), 0);
+    check(s === cat.sub, `BG ${cat.id}/${opt.id}: stat sum ${s} != sub ${cat.sub}`);
+    for (const k of D.STATS) check(typeof opt.stats[k] === "number" && opt.stats[k] >= 0, `BG ${cat.id}/${opt.id}: ${k} must be a non-negative number`);
+  }
 }
+check(subTotal === 18, `BG_CATEGORIES sub-budgets sum ${subTotal} != 18`);
 
 // Player dialogue pool (SAYS) + MOVE.
 for (const r of D.SAYS) {
@@ -229,7 +248,34 @@ check(/phone|camera|record|lens/i.test(JSON.stringify(ish)), "INTIMACY.shoot cho
 const ifl = D.INTIMACY.floor;
 check(ifl && ifl.ask && ifl.condom && ifl.raw && ifl.back && Array.isArray(ifl.beats) && ifl.beats.length >= 2, "INTIMACY.floor malformed");
 check(/floor|bass|crowd|dance|room/i.test(ifl.ask + JSON.stringify(ifl.beats)), "floor scene must reflect the dance floor, not default");
-check(typeof T.attractK === "number" && T.attractK >= 5 && T.attractBaseCap >= 90 && typeof T.attractFloor === "number" && T.attractFloor > 0, "attraction tuning should read higher now");
+check(T.attractFloor === undefined && T.attractK === undefined, "old attraction tuning (attractFloor/attractK) should be gone");
+check(T.attrPhysK >= 4 && T.attrPhysCap >= 40 && T.attrInterestK >= 1 && T.attractBaseCap >= 90 && typeof T.attrVarianceSpan === "number", "new attraction tuning missing or weak");
+// Duplicate the engine's formula here (the smoke can't call game.js).
+// Universality: STR+STY build must out-read INT/CHA build for every
+// character. Variance: spread across characters must be real.
+(function () {
+  const cap = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
+  function attrFor(id, stats) {
+    const c = D.CHARACTERS[id];
+    const phys = cap((stats.strength + stats.style) * (T.attrPhysK / 2), 0, T.attrPhysCap);
+    let interest = 0; for (const s of D.STATS) interest += (c.attractProfile[s] || 0) * stats[s];
+    interest *= T.attrInterestK;
+    const span = T.attrVarianceSpan || 0;
+    const spread = span ? ((hashStr(id) % (span + 1)) - Math.floor(span / 2)) : 0;
+    return cap(Math.round(phys + interest + spread), 0, T.attractBaseCap);
+  }
+  const physBuild = { strength: 9, style: 9, intelligence: 0, charisma: 0 };
+  const mindBuild = { strength: 0, style: 0, intelligence: 9, charisma: 9 };
+  const ids = Object.keys(D.CHARACTERS);
+  let universal = true;
+  for (const id of ids) if (attrFor(id, physBuild) <= attrFor(id, mindBuild)) universal = false;
+  check(universal, "STR/STY build should out-read INT/CHA build for every character");
+  const physVals = ids.map((id) => attrFor(id, physBuild));
+  const mindVals = ids.map((id) => attrFor(id, mindBuild));
+  const spread = (a) => Math.max(...a) - Math.min(...a);
+  check(spread(physVals) >= 8 && spread(mindVals) >= 8, `attraction spread too tight (phys ${spread(physVals)}, mind ${spread(mindVals)})`);
+})();
 (function () {
   let dummy = true;
 })();
@@ -493,15 +539,85 @@ check(dateQ(aiko, brashPicks) < dateQ(aiko, sincerePicks), "aiko prefers sincere
 const romGood = Math.round(T.dateRomance + dateQ(aiko, sincerePicks) * 4);
 check(romGood > T.dateRomance, "a great date should out-gain a flat one");
 
-// --- Economy still solvent without the phone gate. ---
-check(D.LOCATIONS.cafe.work.wage > T.dailyAllowance, "a shift should beat passive allowance");
+// --- Economy: jobs replace the daily allowance. ---
+check(T.dailyAllowance === undefined, "dailyAllowance should be gone — JOBS replace it");
+check(Array.isArray(D.WEEKDAYS) && D.WEEKDAYS.length === 7, "WEEKDAYS must be 7 entries");
+const WD = new Set(D.WEEKDAYS), PH = new Set(D.PHASES);
+check(D.JOBS && D.JOBS.freelance, "JOBS.freelance missing");
+check(D.JOBS.freelance.wage === 0 && Object.keys(D.JOBS.freelance.schedule).length === 0, "freelance must be zero-floor, no shifts");
+let bestWeekly = 0;
+for (const [jid, j] of Object.entries(D.JOBS)) {
+  check(j.name && j.emoji && typeof j.blurb === "string", `JOBS.${jid}: meta`);
+  check(typeof j.wage === "number" && j.wage >= 0, `JOBS.${jid}: wage`);
+  check(j.schedule && typeof j.schedule === "object", `JOBS.${jid}: schedule`);
+  let shifts = 0;
+  for (const [day, phases] of Object.entries(j.schedule)) {
+    check(WD.has(day), `JOBS.${jid}: bad weekday ${day}`);
+    check(Array.isArray(phases) && phases.length, `JOBS.${jid}: empty phases on ${day}`);
+    for (const ph of phases) check(PH.has(ph), `JOBS.${jid}: bad phase ${ph}`);
+    shifts += phases.length;
+  }
+  bestWeekly = Math.max(bestWeekly, j.wage * shifts);
+}
+check(bestWeekly >= 84, `best job weekly total ${bestWeekly} too thin (need >= 84)`);
+check(D.LOCATIONS.cafe.work && D.LOCATIONS.cafe.work.wage > 0, "side income (cafe work) must remain positive");
+
+// --- Houses: tiered, monotonic, cheapest has no yard/hot-tub. ---
+check(D.HOUSES && D.HOUSES.studio, "HOUSES.studio missing");
+const homeRoomKeys = new Set(D.HOME.rooms.map((r) => r.key));
+const houseTiers = Object.values(D.HOUSES).map((h) => h.tier).sort((a, b) => a - b);
+check(new Set(houseTiers).size === houseTiers.length, "HOUSES tiers must be unique");
+let prevRent = -1;
+for (const tier of houseTiers) {
+  const h = Object.values(D.HOUSES).find((x) => x.tier === tier);
+  check(h.rent > prevRent, `HOUSES rent must increase with tier (${h.name} rent ${h.rent} <= ${prevRent})`);
+  prevRent = h.rent;
+}
+for (const [hid, h] of Object.entries(D.HOUSES)) {
+  check(h.name && h.emoji && typeof h.blurb === "string", `HOUSES.${hid}: meta`);
+  check(Array.isArray(h.rooms) && h.rooms.length, `HOUSES.${hid}: rooms`);
+  for (const r of h.rooms) check(homeRoomKeys.has(r), `HOUSES.${hid}: room ${r} not in HOME`);
+  check(typeof h.hotTub === "boolean", `HOUSES.${hid}: hotTub must be boolean`);
+  check(h.impress && typeof h.impress === "object", `HOUSES.${hid}: impress object`);
+  for (const k of Object.keys(h.impress)) check(TRAIT.has(k), `HOUSES.${hid}: bad trait ${k}`);
+}
+const cheap = Object.values(D.HOUSES).find((h) => h.tier === 0);
+check(cheap && !cheap.hotTub && cheap.rooms.indexOf("yard") === -1, "cheapest house must have no yard and no hot tub");
+check(Object.values(D.HOUSES).some((h) => h.hotTub), "at least one tier must have a hot tub");
+// The yard's hot-tub node still has to exist in HOME so the runtime
+// gating-by-flag is meaningful.
+const yard = D.HOME.rooms.find((r) => r.key === "yard");
+check(yard && yard.actions.some((a) => a.chance === true), "HOME yard must still define the chance:true hot-tub node");
+
+// --- Cars: tiered, none is free + walking, dislike/impress trait-keyed. ---
+check(D.CARS && D.CARS.none, "CARS.none missing");
+check(D.CARS.none.lease === 0 && D.CARS.none.drive === false, "CARS.none must be lease 0 + drive false");
+const carTiers = Object.values(D.CARS).map((c) => c.tier).sort((a, b) => a - b);
+check(new Set(carTiers).size === carTiers.length, "CARS tiers must be unique");
+let prevLease = -1;
+for (const tier of carTiers) {
+  const c = Object.values(D.CARS).find((x) => x.tier === tier);
+  check(c.lease >= prevLease, `CARS lease must be monotonic by tier (${c.name})`);
+  prevLease = c.lease;
+}
+for (const [cid, c] of Object.entries(D.CARS)) {
+  check(c.name && c.emoji, `CARS.${cid}: meta`);
+  check(typeof c.drive === "boolean", `CARS.${cid}: drive boolean`);
+  check(c.dislike && c.impress, `CARS.${cid}: dislike/impress objects`);
+  for (const k of Object.keys(c.dislike)) check(TRAIT.has(k), `CARS.${cid}: dislike bad trait ${k}`);
+  for (const k of Object.keys(c.impress)) check(TRAIT.has(k), `CARS.${cid}: impress bad trait ${k}`);
+}
+check(Object.values(D.CARS).some((c) => c.drive), "at least one car must actually drive");
+check(typeof T.carDislikeQ === "number" && T.carDislikeQ > 0 && T.carDislikeQ < 1, "T.carDislikeQ must be in (0, 1)");
 
 const CHARS = Object.keys(D.CHARACTERS);
 check(CHARS.length >= 5, `expected >=5 characters, got ${CHARS.length}`);
 const favs = CHARS.map((id) => D.CHARACTERS[id].favoriteGift);
 check(new Set(favs).size === favs.length, "favorite gifts should be distinct per character");
 
-console.log("Backgrounds:", Object.keys(D.BACKGROUNDS).join(", "));
+console.log("BG categories:", D.BG_CATEGORIES.map((c) => `${c.id}(${c.sub})=[${c.opts.map((o) => o.id).join("/")}]`).join(" · "));
+console.log("Jobs:", Object.keys(D.JOBS).join(", "));
+console.log("Houses:", Object.keys(D.HOUSES).join(", "), "| Cars:", Object.keys(D.CARS).join(", "));
 console.log("Characters:", CHARS.join(", "));
 console.log("Locations:", Object.keys(D.LOCATIONS).join(", "), "| date spots:", Object.keys(D.DATE_SCENES).join(","));
 console.log("Bars:", D.BARS.join(", "));

@@ -1,18 +1,28 @@
 (function () {
   const D = window.GAMEDATA;
   const T = D.TUNING;
-  const SAVE_KEY = "lifeSimSave_v3";
+  const SAVE_KEY = "lifeSimSave_v4";
   const CHAR_IDS = Object.keys(D.CHARACTERS);
   let state = null;
 
   const perChar = (mk) => { const o = {}; for (const id of CHAR_IDS) o[id] = mk(); return o; };
   function rollLibido(c) { const [lo, hi] = c.libidoRange; return lo + Math.floor(Math.random() * (hi - lo + 1)); }
   function freshBars(id) { return { affection: 0, romance: 0, libidoBase: rollLibido(D.CHARACTERS[id]), libidoTemp: 0, attrEvent: 0 }; }
-  function freshState(bgId) {
+  function statsFromPicks(picks) {
+    const out = {}; for (const s of D.STATS) out[s] = 0;
+    for (const cat of D.BG_CATEGORIES) {
+      const opt = cat.opts.find((o) => o.id === (picks && picks[cat.id]));
+      if (!opt) continue;
+      for (const s of D.STATS) out[s] += opt.stats[s] || 0;
+    }
+    return out;
+  }
+  function freshState(picks) {
     const bars = {}; for (const id of CHAR_IDS) bars[id] = freshBars(id);
     return {
-      background: bgId, stats: Object.assign({}, D.BACKGROUNDS[bgId].stats),
+      bgPicks: Object.assign({}, picks), stats: statsFromPicks(picks),
       day: 1, phaseIndex: 0, money: T.startMoney, bars,
+      job: "freelance", owned: { house: "studio", car: "none" }, lastRollover: null,
       metCount: perChar(() => 0), learned: perChar(() => []),
       milestones: perChar(() => ({ number: false, kiss: false, dates: 0 })),
       preg: perChar(() => null),
@@ -23,16 +33,92 @@
 
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
   const phaseName = () => D.PHASES[state.phaseIndex];
+  const weekdayName = () => D.WEEKDAYS[((state.day - 1) % 7 + 7) % 7];
+  const jobDef = () => D.JOBS[state.job] || D.JOBS.freelance;
+  const houseDef = () => D.HOUSES[state.owned.house] || D.HOUSES.studio;
+  const carDef = () => D.CARS[state.owned.car] || D.CARS.none;
+  const canDrive = () => !!carDef().drive;
+  function workSlotNow() {
+    const j = jobDef(); if (!j || !j.schedule) return false;
+    const slots = j.schedule[weekdayName()];
+    return !!(slots && slots.indexOf(phaseName()) !== -1);
+  }
+  function homeRoomAllowed(roomKey) {
+    return houseDef().rooms.indexOf(roomKey) !== -1;
+  }
+  // Apply a small affection nudge from her trait-read of the player's
+  // house (positive only — a cheap house just doesn't impress).
+  function houseImpressFor(id) {
+    const ta = D.CHARACTERS[id].traitAffinity || {}, imp = houseDef().impress || {};
+    let s = 0; for (const k of Object.keys(imp)) s += (ta[k] || 0) * imp[k];
+    return Math.max(0, Math.round(s));
+  }
+  // Per-character read of the car. Returns {penalty, bonus} — penalty
+  // is what a beater costs you with classy types; bonus is the inverse.
+  function carRead(id) {
+    const ta = D.CHARACTERS[id].traitAffinity || {}, car = carDef();
+    let pen = 0, bon = 0;
+    for (const k of Object.keys(car.dislike || {})) pen += (ta[k] || 0) * car.dislike[k];
+    for (const k of Object.keys(car.impress || {})) bon += (ta[k] || 0) * car.impress[k];
+    return { penalty: Math.max(0, pen), bonus: Math.max(0, bon) };
+  }
+  // Rent + lease at day rollover. If you can't cover both at your
+  // current tiers, drop the car first (cheaper to lose), then the house,
+  // to the best combo you CAN afford. Records a notice for the next
+  // render so the player sees what got cut.
+  function chargeRecurring() {
+    const housesByTier = Object.entries(D.HOUSES).sort((a, b) => b[1].tier - a[1].tier);
+    const carsByTier = Object.entries(D.CARS).sort((a, b) => b[1].tier - a[1].tier);
+    const curHouse = state.owned.house, curCar = state.owned.car;
+    let rent = houseDef().rent, lease = carDef().lease, total = rent + lease;
+    if (state.money >= total) { state.money -= total; state.lastRollover = null; return; }
+    // Try downgrading the car first (cheaper hit on her), keeping house.
+    let bestHouse = curHouse, bestCar = curCar, bestCost = total;
+    for (const [cid, cdef] of carsByTier) {
+      if (cdef.tier > carDef().tier) continue;
+      const cost = rent + cdef.lease;
+      if (cost <= state.money) { bestCar = cid; bestCost = cost; break; }
+    }
+    if (bestCost > state.money) {
+      // Still not enough — also walk house down (cheapest car always 0).
+      for (const [hid, hdef] of housesByTier) {
+        if (hdef.tier > houseDef().tier) continue;
+        const cost = hdef.rent; // pair with no car
+        if (cost <= state.money) { bestHouse = hid; bestCar = "none"; bestCost = cost; break; }
+      }
+    }
+    if (bestCost > state.money) {
+      // Floor: studio + none, deduct what we can (mirror bill tolerance).
+      bestHouse = "studio"; bestCar = "none"; bestCost = D.HOUSES.studio.rent;
+    }
+    const note = { downHouse: bestHouse !== curHouse ? { from: curHouse, to: bestHouse } : null,
+                   downCar: bestCar !== curCar ? { from: curCar, to: bestCar } : null };
+    state.owned.house = bestHouse; state.owned.car = bestCar;
+    state.money = Math.max(0, state.money - bestCost);
+    state.lastRollover = note;
+  }
   const round1 = (n) => Math.round(n * 10) / 10;
   const d20 = () => 1 + Math.floor(Math.random() * 20);
   const one = (a) => a[Math.floor(Math.random() * a.length)];
   function pickN(a, n) { const x = a.slice(); for (let i = x.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [x[i], x[j]] = [x[j], x[i]]; } return x.slice(0, n); }
 
   function effStat(s) { let v = state.stats[s]; for (const b of state.buffs) if (b.stat === s) v += b.amount; return Math.max(0, Math.floor(v)); }
+  // Stable per-id hash — keeps the variance term deterministic so the
+  // HUD doesn't flicker on every re-render.
+  function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
   function attraction(id) {
-    const c = D.CHARACTERS[id]; let base = 0;
-    for (const s of D.STATS) base += (c.attractProfile[s] || 0) * effStat(s);
-    base = clamp(Math.round(base * T.attractK) + (T.attractFloor || 0), 0, T.attractBaseCap);
+    const c = D.CHARACTERS[id];
+    // STR + STY dominate for everyone (physical read).
+    const phys = clamp((effStat("strength") + effStat("style")) * (T.attrPhysK / 2), 0, T.attrPhysCap);
+    // Per-character interest term — who reads you well.
+    let interest = 0;
+    for (const s of D.STATS) interest += (c.attractProfile[s] || 0) * effStat(s);
+    interest *= T.attrInterestK;
+    // Deterministic spread so two characters look different even with the
+    // same build (and the value is stable across re-renders).
+    const span = T.attrVarianceSpan || 0;
+    const spread = span ? ((hashStr(id) % (span + 1)) - Math.floor(span / 2)) : 0;
+    const base = clamp(Math.round(phys + interest + spread), 0, T.attractBaseCap);
     return clamp(base + clamp(state.bars[id].attrEvent, 0, T.attractEventCap), 0, T.barCap);
   }
   function barVal(id, bar) {
@@ -74,7 +160,7 @@
     state.buffs = state.buffs.map((b) => ({ ...b, phasesLeft: b.phasesLeft - 1 })).filter((b) => b.phasesLeft > 0);
     state.phaseIndex += 1;
     if (state.phaseIndex >= D.PHASES.length) {
-      state.phaseIndex = 0; state.day += 1; state.money += T.dailyAllowance; state.textedToday = perChar(() => false);
+      state.phaseIndex = 0; state.day += 1; chargeRecurring(); state.textedToday = perChar(() => false);
       for (const id of CHAR_IDS) {
         const c = D.CHARACTERS[id], b = state.bars[id];
         b.affection = clamp(b.affection - c.decay.affection, 0, T.barCap);
@@ -96,10 +182,15 @@
     hud.classList.toggle("hidden", !playing); document.getElementById("toolbar").classList.toggle("hidden", !playing);
     if (!playing) return; hud.innerHTML = "";
     const top = el("div", "hud-top");
-    top.appendChild(el("span", "hud-time", `Day ${state.day} · ${phaseName()}`));
+    top.appendChild(el("span", "hud-time", `${weekdayName()} · Day ${state.day} · ${phaseName()}`));
     const right = el("div", "hud-right");
     right.appendChild(el("span", "money", `$${state.money}`)); right.appendChild(el("span", "chip", "📱"));
     top.appendChild(right); hud.appendChild(top);
+    const life = el("div", "stat-chips");
+    life.appendChild(el("span", "chip", `${houseDef().emoji} ${houseDef().name} ($${houseDef().rent}/d)`));
+    life.appendChild(el("span", "chip", `${carDef().emoji} ${carDef().name}${carDef().lease ? ` ($${carDef().lease}/d)` : ""}`));
+    life.appendChild(el("span", "chip", `${jobDef().emoji} ${jobDef().name}`));
+    hud.appendChild(life);
     const sc = el("div", "stat-chips");
     for (const s of D.STATS) {
       const e = effStat(s), buffed = e !== Math.floor(state.stats[s]), frac = state.stats[s] - Math.floor(state.stats[s]);
@@ -144,26 +235,71 @@
     if (!hasSave()) cont.disabled = true;
     b.appendChild(cont); w.appendChild(b); screen().appendChild(w);
   }
+  let createDraft = null;
   function renderCreate() {
+    createDraft = {}; renderCreateStep(0);
+  }
+  function renderCreateStep(stepIdx) {
     clearScreen();
+    const cat = D.BG_CATEGORIES[stepIdx];
     const w = el("div", "create");
-    w.appendChild(el("h2", null, "Who are you?"));
-    w.appendChild(el("p", "subtitle", "Background sets your start. Five very different people are out there — each reads you differently."));
+    w.appendChild(el("h2", null, `Who are you?  ·  ${stepIdx + 1}/${D.BG_CATEGORIES.length}`));
+    w.appendChild(el("p", "subtitle", `${cat.name}. ${cat.blurb}`));
+    // Running total preview so the player can see the stat shape forming.
+    const running = statsFromPicks(createDraft);
+    const tot = D.STATS.reduce((a, s) => a + running[s], 0);
+    const preview = el("div", "stat-chips");
+    for (const s of D.STATS) preview.appendChild(el("span", "chip", `${D.STAT_SHORT[s]} ${running[s]}`));
+    preview.appendChild(el("span", "chip buffed", `Total ${tot}/18`));
+    w.appendChild(preview);
     const grid = el("div", "bg-grid");
-    for (const [id, bg] of Object.entries(D.BACKGROUNDS)) {
+    for (const opt of cat.opts) {
       const card = el("div", "bg-card");
-      card.appendChild(el("div", "bg-emoji", bg.emoji)); card.appendChild(el("div", "bg-name", bg.name)); card.appendChild(el("div", "bg-blurb", bg.blurb));
-      const st = el("div", "bg-stats"); for (const s of D.STATS) st.appendChild(el("span", "chip", `${D.STAT_SHORT[s]} ${bg.stats[s]}`)); card.appendChild(st);
-      card.appendChild(button("Choose", () => { state = freshState(id); saveGame(); renderPhase(); }, "primary"));
+      card.appendChild(el("div", "bg-emoji", opt.emoji));
+      card.appendChild(el("div", "bg-name", opt.name));
+      card.appendChild(el("div", "bg-blurb", opt.blurb));
+      const st = el("div", "bg-stats");
+      for (const s of D.STATS) if (opt.stats[s]) st.appendChild(el("span", "chip", `${D.STAT_SHORT[s]} +${opt.stats[s]}`));
+      card.appendChild(st);
+      const isLast = stepIdx + 1 >= D.BG_CATEGORIES.length;
+      card.appendChild(button(isLast ? "Begin" : "Choose", () => {
+        createDraft[cat.id] = opt.id;
+        if (isLast) { state = freshState(createDraft); saveGame(); renderPhase(); }
+        else renderCreateStep(stepIdx + 1);
+      }, "primary"));
       grid.appendChild(card);
     }
-    w.appendChild(grid); screen().appendChild(w);
+    w.appendChild(grid);
+    const nav = el("div", "choices");
+    if (stepIdx > 0) nav.appendChild(button("← Back", () => renderCreateStep(stepIdx - 1), "choice subtle"));
+    nav.appendChild(button("Cancel", renderTitle, "choice subtle"));
+    w.appendChild(nav);
+    screen().appendChild(w);
   }
 
   function renderPhase() {
     saveGame(); renderHud(); clearScreen();
     const w = el("div", "phase");
-    w.appendChild(el("h2", null, `Day ${state.day} — ${phaseName()}`));
+    w.appendChild(el("h2", null, `${weekdayName()} · Day ${state.day} — ${phaseName()}`));
+    if (state.lastRollover) {
+      const r = state.lastRollover, bits = [];
+      if (r.downCar) bits.push(`returned the ${D.CARS[r.downCar.from].name} — back to the ${D.CARS[r.downCar.to].name}`);
+      if (r.downHouse) bits.push(`couldn't make rent on the ${D.HOUSES[r.downHouse.from].name} — moved into the ${D.HOUSES[r.downHouse.to].name}`);
+      if (bits.length) w.appendChild(el("p", "char-line dim", `💸 Rent day: ${bits.join("; ")}.`));
+      state.lastRollover = null;
+    }
+    if (workSlotNow()) {
+      const j = jobDef();
+      w.appendChild(el("p", "char-line", `🛠️ You're on shift — ${j.name}. Nothing else is happening this part of the day.`));
+      if (isPartyNow()) w.appendChild(el("p", "char-line dim", "📨 (A party tonight, but your shift's running through it. You'll miss this one.)"));
+      const o = el("div", "choices");
+      o.appendChild(button(`Clock out  (+$${j.wage})`, () => {
+        state.money += j.wage;
+        if (isPartyNow()) state.party = null; // shift ate the party slot
+        advancePhase();
+      }, "primary"));
+      w.appendChild(o); screen().appendChild(w); return;
+    }
     w.appendChild(el("p", "subtitle", "Where to? One thing per part of the day."));
     const grid = el("div", "loc-grid");
     if (isPartyNow()) {
@@ -184,6 +320,7 @@
     w.appendChild(grid);
     const tools = el("div", "choices");
     tools.appendChild(button("📱 Phone", () => renderPhone(renderPhase), "choice subtle"));
+    tools.appendChild(button("🏷️ Life", () => renderLife(renderPhase), "choice subtle"));
     tools.appendChild(button(`Open bag${invCount() ? ` (${invCount()})` : ""}`, () => renderBag(renderPhase), "choice subtle"));
     w.appendChild(tools); screen().appendChild(w);
   }
@@ -342,6 +479,66 @@
     const it = D.ITEMS[id]; state.inventory[id] -= 1;
     state.buffs.push({ stat: it.stat, amount: it.amount, phasesLeft: it.phases });
     renderResult({ title: `Used ${it.name}`, lines: [`+${it.amount} ${D.STAT_SHORT[it.stat]} for ${it.phases} phase(s).`], tone: "good", then: back });
+  }
+
+  // Format a JOBS schedule into a compact weekly string.
+  function jobScheduleLine(j) {
+    if (!j.schedule || !Object.keys(j.schedule).length) return "No shifts.";
+    return D.WEEKDAYS.filter((d) => j.schedule[d] && j.schedule[d].length)
+      .map((d) => `${d} ${j.schedule[d].map((p) => p[0]).join("/")}`).join(" · ");
+  }
+  function renderLife(back) {
+    renderHud(); clearScreen();
+    const w = el("div", "location");
+    w.appendChild(el("h2", null, "🏷️ Life"));
+    w.appendChild(el("p", "subtitle", `$${state.money}. Career, home, ride — change them here. Rent and lease are charged at each day rollover.`));
+    // Career
+    w.appendChild(el("div", "talk-head", "💼 Career"));
+    const onShift = workSlotNow();
+    if (onShift) w.appendChild(el("p", "char-line dim", "Can't switch mid-shift — clock out first."));
+    const jobList = el("div", "choices");
+    for (const [jid, j] of Object.entries(D.JOBS)) {
+      const card = el("div", "shop-item");
+      const here = jid === state.job;
+      card.appendChild(el("div", "person-name", `${j.emoji} ${j.name}${here ? "  · current" : ""}  · $${j.wage}/shift`));
+      card.appendChild(el("div", "shop-desc", `${j.blurb}  —  ${jobScheduleLine(j)}`));
+      if (here) card.appendChild(button("Current", null, "choice", true));
+      else card.appendChild(button("Switch", () => { state.job = jid; saveGame(); renderLife(back); }, "choice", onShift));
+      jobList.appendChild(card);
+    }
+    w.appendChild(jobList);
+    // Home
+    w.appendChild(el("div", "talk-head", "🏠 Home"));
+    const houseList = el("div", "choices");
+    for (const [hid, h] of Object.entries(D.HOUSES)) {
+      const card = el("div", "shop-item");
+      const here = hid === state.owned.house;
+      const perks = []; if (h.rooms.indexOf("yard") !== -1) perks.push("yard"); if (h.hotTub) perks.push("hot tub");
+      card.appendChild(el("div", "person-name", `${h.emoji} ${h.name}${here ? "  · current" : ""}  · $${h.rent}/day`));
+      card.appendChild(el("div", "shop-desc", `${h.blurb}${perks.length ? "  —  " + perks.join(", ") : ""}`));
+      if (here) card.appendChild(button("Current", null, "choice", true));
+      else if (state.money < h.rent) card.appendChild(button(`Can't afford first day ($${h.rent})`, null, "choice", true));
+      else card.appendChild(button(`Move in  (−$${h.rent})`, () => { state.money -= h.rent; state.owned.house = hid; saveGame(); renderLife(back); }, "choice"));
+      houseList.appendChild(card);
+    }
+    w.appendChild(houseList);
+    // Car
+    w.appendChild(el("div", "talk-head", "🚗 Car"));
+    const carList = el("div", "choices");
+    for (const [cid, c] of Object.entries(D.CARS)) {
+      const card = el("div", "shop-item");
+      const here = cid === state.owned.car;
+      const tags = []; if (c.drive) tags.push("drives"); else tags.push("walking");
+      card.appendChild(el("div", "person-name", `${c.emoji} ${c.name}${here ? "  · current" : ""}  · ${c.lease ? "$" + c.lease + "/day" : "free"}`));
+      card.appendChild(el("div", "shop-desc", `${c.blurb}  —  ${tags.join(", ")}`));
+      if (here) card.appendChild(button("Current", null, "choice", true));
+      else if (state.money < c.lease) card.appendChild(button(`Can't afford first day ($${c.lease})`, null, "choice", true));
+      else card.appendChild(button(c.lease ? `Lease  (−$${c.lease})` : "Return the car", () => { state.money -= c.lease; state.owned.car = cid; saveGame(); renderLife(back); }, "choice"));
+      carList.appendChild(card);
+    }
+    w.appendChild(carList);
+    w.appendChild(button("Back", back, "choice subtle"));
+    screen().appendChild(w);
   }
 
   // ---------- conversation ----------
@@ -522,7 +719,8 @@
     for (const [lid, loc] of Object.entries(D.LOCATIONS)) {
       if (!loc.overlookSpot && !loc.beachSpot) continue;
       const tag = loc.dateCost ? `~$${loc.dateCost}` : "free";
-      o.appendChild(button(`${loc.emoji} ${loc.name}  (${tag})`, () => startDate(id, lid), "choice move"));
+      if (!canDrive()) o.appendChild(button(`${loc.emoji} ${loc.name}  (${tag}) — 🚗 needs a car`, null, "choice", true));
+      else o.appendChild(button(`${loc.emoji} ${loc.name}  (${tag})`, () => startDate(id, lid), "choice move"));
     }
     o.appendChild(button("Not now", advancePhase, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
@@ -579,6 +777,20 @@
     for (const p of dt.picks) { score += (c.traitAffinity[p.trait] || 0) * p.mag; mag += p.mag; }
     let q = mag ? score / mag : 0;
     if (bopt && bopt.cheap) { const pen = (c.traitAffinity.independent || 0) >= 2 ? Math.round(T.cheapBillPenalty / 2) : T.cheapBillPenalty; adjustBar(dt.id, "affection", -pen); q -= 0.4; }
+    // Car read — once per venue. Beater + classy = real bite. Luxury reads positive.
+    const cr = carRead(dt.id);
+    let carLine = null;
+    if (cr.penalty > 0) {
+      q -= cr.penalty * T.carDislikeQ;
+      const hit = Math.min(4, Math.round(cr.penalty));
+      adjustBar(dt.id, "affection", -hit); dt.totAff -= hit;
+      carLine = `· the ${carDef().name} did not help.`;
+    } else if (cr.bonus > 0) {
+      q += cr.bonus * T.carDislikeQ * 0.5;
+      const bump = Math.min(3, Math.round(cr.bonus));
+      adjustBar(dt.id, "attraction", bump);
+      carLine = `· she noticed the ${carDef().name}.`;
+    }
     const rom = Math.round(T.dateRomance + q * 4), aff = Math.round(T.dateAffection + q * 3);
     adjustBar(dt.id, "romance", rom); adjustBar(dt.id, "affection", aff);
     if (q > 0.5) adjustBar(dt.id, "attraction", T.dateAttractionEvent);
@@ -587,7 +799,8 @@
     renderResult({
       title: q > 1 ? `${vn}: a great stretch` : q > 0 ? `${vn}: going well` : q > -0.5 ? `${vn}: just okay` : `${vn}: stiff`,
       lines: [q > 0.6 ? `${c.name} is fully in this. You can feel it.` : q < -0.3 ? `${c.name} is being polite, which is its own kind of answer.` : `${c.name} seems content to see where this goes.`,
-        `Romance ${rom >= 0 ? "+" : ""}${rom} · Affection ${aff >= 0 ? "+" : ""}${aff}${bopt && bopt.cheap ? " · the cheap move landed badly" : ""}`, dt.spent ? `Spent so far: $${dt.spent}.` : "No bill here — just the night."],
+        `Romance ${rom >= 0 ? "+" : ""}${rom} · Affection ${aff >= 0 ? "+" : ""}${aff}${bopt && bopt.cheap ? " · the cheap move landed badly" : ""}${carLine ? "  " + carLine : ""}`,
+        dt.spent ? `Spent so far: $${dt.spent}.` : "No bill here — just the night."],
       tone: q > 0 ? "good" : q > -0.5 ? "neutral" : "bad", then: () => offerContinue(q), thenLabel: "And then…",
     });
   }
@@ -605,8 +818,14 @@
     w.appendChild(el("p", "char-line", lastQ > 0.6 ? `${c.name}, close to your ear: "I'm not ready for this to be over."` : `${c.name} glances at the door, then back at you. Open to more.`));
     const o = el("div", "choices");
     for (const [lid, loc] of venues) o.appendChild(button(`\"Come on — ${loc.name}.\"  (${loc.dateCost ? "~$" + loc.dateCost : "free"})`, () => startDate(dt.id, lid), "choice"));
-    if (overlookOK) o.appendChild(button(`\"Drive up to the overlook with me.\"  (${D.LOCATIONS.overlook.dateCost ? "~$" + D.LOCATIONS.overlook.dateCost : "free"})`, () => startDate(dt.id, "overlook"), "choice move"));
-    if (beachOK) o.appendChild(button(`\"Let's go down to the beach.\"  (${D.LOCATIONS.beach.dateCost ? "~$" + D.LOCATIONS.beach.dateCost : "free"})`, () => startDate(dt.id, "beach"), "choice move"));
+    if (overlookOK) {
+      if (canDrive()) o.appendChild(button(`\"Drive up to the overlook with me.\"  (${D.LOCATIONS.overlook.dateCost ? "~$" + D.LOCATIONS.overlook.dateCost : "free"})`, () => startDate(dt.id, "overlook"), "choice move"));
+      else o.appendChild(button("\"Drive up to the overlook with me.\" — 🚗 needs a car", null, "choice", true));
+    }
+    if (beachOK) {
+      if (canDrive()) o.appendChild(button(`\"Let's go down to the beach.\"  (${D.LOCATIONS.beach.dateCost ? "~$" + D.LOCATIONS.beach.dateCost : "free"})`, () => startDate(dt.id, "beach"), "choice move"));
+      else o.appendChild(button("\"Let's go down to the beach.\" — 🚗 needs a car", null, "choice", true));
+    }
     if (homeOK) o.appendChild(button(`\"…my place?\"  (${D.LOCATIONS.home.dateCost ? "~$" + D.LOCATIONS.home.dateCost : "free"})`, () => startDate(dt.id, "home"), "choice move"));
     o.appendChild(button("Wind it down here", renderDateEnd, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
@@ -656,17 +875,37 @@
   function startBeach() { startPlace("beach"); }
   function startPlace(place) {
     const dt = state.date, c = D.CHARACTERS[dt.id];
+    const firstEntry = !dt.used.includes(place);
     dt.place = place;
     dt.home = { inti: 0, loosen: false, swim: null, un: {}, attire: null };
-    if (!dt.used.includes(place)) {
+    if (firstEntry) {
       dt.used.push(place);
       const cost = (D.LOCATIONS[place] && D.LOCATIONS[place].dateCost) || 0;
       if (cost) { const due = Math.min(cost, state.money); state.money -= due; dt.spent += due; }
+    }
+    // First-entry reads of the place (house impress on home, car read anywhere).
+    const sideLines = [];
+    if (firstEntry) {
+      if (place === "home") {
+        const imp = houseImpressFor(dt.id);
+        if (imp > 0) { adjustBar(dt.id, "affection", imp); dt.totAff += imp; sideLines.push(`(She clocks the place — affection +${imp}.)`); }
+      }
+      const cr = carRead(dt.id);
+      if (cr.penalty > 0) {
+        const hit = Math.min(4, Math.round(cr.penalty));
+        adjustBar(dt.id, "affection", -hit); dt.totAff -= hit;
+        sideLines.push(`(The ${carDef().name} did not do you any favors — affection −${hit}.)`);
+      } else if (cr.bonus > 0) {
+        const bump = Math.min(4, Math.round(cr.bonus));
+        adjustBar(dt.id, "attraction", bump);
+        sideLines.push(`(She glances at the ${carDef().name} — attraction +${bump}.)`);
+      }
     }
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `${placeIcon()} ${placeName()} · with ${c.name}`));
     w.appendChild(el("p", "char-line", subN(placeDef().intro, c.name)));
+    for (const l of sideLines) w.appendChild(el("p", "char-line dim", l));
     w.appendChild(button(place === "overlook" ? "Take it in" : place === "beach" ? "Down to the sand" : "Show her in", renderHomeRooms, "primary"));
     screen().appendChild(w);
   }
@@ -678,7 +917,10 @@
     const sl = homeStateLine();
     if (sl) w.appendChild(el("p", "char-line dim", sl));
     const o = el("div", "choices");
+    const homeIsOwned = dt.place === "home";
     placeDef().rooms.forEach((room, i) => {
+      // Owned-house tier gates which HOME rooms exist at all.
+      if (homeIsOwned && !homeRoomAllowed(room.key)) return;
       if (room.key === "bedroom" && !bedroomUnlocked())
         o.appendChild(button(`${room.name} 🔒`, () => renderResult({ title: "Not tonight", lines: [subN(room.gateFail, c.name)], tone: "neutral", then: renderHomeRooms, thenLabel: "Back" }), "choice subtle"));
       else o.appendChild(button(room.name, () => renderHomeMenu(i, []), "choice"));
@@ -710,6 +952,8 @@
     const o = el("div", "choices");
     homeChildren(node).forEach((child, i) => {
       if (child.ustep && !undressVisible(child)) return;
+      // Hot-tub: only owned houses with the perk get it.
+      if (child.chance && dt.place === "home" && !houseDef().hotTub) return;
       if (child.rooms) return o.appendChild(button(child.label || "Go somewhere else", renderHomeRooms, "choice subtle"));
       if (child.back) return o.appendChild(button(child.label || "Back", () => renderHomeMenu(roomIdx, path.slice(0, -1)), "choice subtle"));
       if (gateMissing(child.gate)) return o.appendChild(button(`${child.label} — she's not there yet`, null, "choice", true));
@@ -1585,9 +1829,15 @@
   function loadGame() {
     try {
       const raw = localStorage.getItem(SAVE_KEY); if (!raw) return false;
-      const p = JSON.parse(raw); if (!p || !p.background || !D.BACKGROUNDS[p.background]) return false;
-      const base = freshState(p.background);
+      const p = JSON.parse(raw); if (!p || !p.bgPicks) return false;
+      // Every category pick must resolve under the current data.
+      for (const cat of D.BG_CATEGORIES) {
+        const pickId = p.bgPicks[cat.id];
+        if (!pickId || !cat.opts.some((o) => o.id === pickId)) return false;
+      }
+      const base = freshState(p.bgPicks);
       state = Object.assign(base, p);
+      state.bgPicks = Object.assign({}, p.bgPicks);
       state.stats = Object.assign({}, base.stats, p.stats);
       state.bars = {}; for (const id of CHAR_IDS) state.bars[id] = Object.assign(freshBars(id), p.bars && p.bars[id]);
       state.metCount = Object.assign(perChar(() => 0), p.metCount);
@@ -1597,6 +1847,11 @@
       state.inventory = p.inventory || {};
       state.buffs = Array.isArray(p.buffs) ? p.buffs : [];
       state.textedToday = Object.assign(perChar(() => false), p.textedToday);
+      state.owned = Object.assign({ house: "studio", car: "none" }, p.owned || {});
+      if (!D.HOUSES[state.owned.house]) state.owned.house = "studio";
+      if (!D.CARS[state.owned.car]) state.owned.car = "none";
+      state.job = D.JOBS[p.job] ? p.job : "freelance";
+      state.lastRollover = null;
       state.convo = null; state.date = null; state.pg = null; state.partyRun = null;
       return true;
     } catch (e) { return false; }

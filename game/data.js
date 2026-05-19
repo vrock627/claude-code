@@ -7,11 +7,71 @@
   const BAR_SHORT = { attraction: "ATR", affection: "AFF", romance: "ROM", libido: "LIB" };
   const TRAITS = ["sincere", "playful", "classy", "adventurous", "generous", "independent"];
 
-  const BACKGROUNDS = {
-    athlete: { name: "Athlete", emoji: "🏋️", blurb: "Gym rat. Strong, steady, terrible at small talk.", stats: { strength: 8, style: 4, intelligence: 3, charisma: 3 } },
-    scholar: { name: "Scholar", emoji: "🎓", blurb: "Reads everything. Sharp mind, soft handshake.", stats: { strength: 3, style: 3, intelligence: 8, charisma: 4 } },
-    socialite: { name: "Socialite", emoji: "🥂", blurb: "Knows everyone. Charm first, substance later.", stats: { strength: 2, style: 6, intelligence: 2, charisma: 8 } },
-    artist: { name: "Artist", emoji: "🎨", blurb: "All taste and vibes. Style for days.", stats: { strength: 2, style: 8, intelligence: 5, charisma: 3 } },
+  // Character creation: pick one from each category. Sub-budgets sum to
+  // 18, always — so the starting stat pool stays exactly where the rest
+  // of the economy/DC tuning expects it, regardless of combo.
+  const BG_CATEGORIES = [
+    { id: "origin", name: "Where you're from", sub: 8, blurb: "Where you grew up shaped the rough shape of you.", opts: [
+      { id: "gymrat", name: "Gym kid", emoji: "🏋️", blurb: "Spent your teens under a barbell. Built first, polished later.", stats: { strength: 5, style: 1, intelligence: 1, charisma: 1 } },
+      { id: "bookish", name: "Bookworm", emoji: "📚", blurb: "Library kid. Read everything; spoke up rarely.", stats: { strength: 1, style: 1, intelligence: 5, charisma: 1 } },
+      { id: "socialite", name: "Popular kid", emoji: "🥂", blurb: "Always knew everyone. Made it look effortless.", stats: { strength: 1, style: 1, intelligence: 1, charisma: 5 } },
+      { id: "artkid", name: "Art kid", emoji: "🎨", blurb: "Sketched in margins, lived in thrift stores.", stats: { strength: 1, style: 5, intelligence: 1, charisma: 1 } },
+    ] },
+    { id: "training", name: "What you trained in", sub: 6, blurb: "The thing you put real hours into after school.", opts: [
+      { id: "athlete", name: "Athlete", emoji: "🥇", blurb: "Sport, varsity, all of it.", stats: { strength: 3, style: 1, intelligence: 1, charisma: 1 } },
+      { id: "scholar", name: "Scholar", emoji: "🎓", blurb: "Books and lectures and arguments.", stats: { strength: 1, style: 1, intelligence: 3, charisma: 1 } },
+      { id: "entertainer", name: "Entertainer", emoji: "🎤", blurb: "Stages, crowds, working a room.", stats: { strength: 1, style: 1, intelligence: 1, charisma: 3 } },
+      { id: "stylist", name: "Stylist", emoji: "🧵", blurb: "Clothes, frames, taste as a craft.", stats: { strength: 1, style: 3, intelligence: 1, charisma: 1 } },
+    ] },
+    { id: "lifestyle", name: "How you live now", sub: 4, blurb: "The way you actually move through a week these days.", opts: [
+      { id: "hustler", name: "Hustler", emoji: "💼", blurb: "Always moving, always on it.", stats: { strength: 2, style: 1, intelligence: 1, charisma: 0 } },
+      { id: "thinker", name: "Thinker", emoji: "🧠", blurb: "Slow with people, fast with ideas.", stats: { strength: 0, style: 1, intelligence: 2, charisma: 1 } },
+      { id: "charmer", name: "Charmer", emoji: "😏", blurb: "Talk first; the rest follows.", stats: { strength: 0, style: 1, intelligence: 1, charisma: 2 } },
+      { id: "trendsetter", name: "Trendsetter", emoji: "✨", blurb: "People copy you, late.", stats: { strength: 0, style: 2, intelligence: 1, charisma: 1 } },
+    ] },
+  ];
+
+  const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+  // Career: pick one. Weekly schedule blocks the (weekday, phase) slots
+  // listed — you're auto at work, that wage is credited, and you can't
+  // do anything else those phases. `freelance` is the zero-floor option.
+  const JOBS = {
+    freelance: { name: "Freelance", emoji: "🎲", wage: 0, blurb: "No boss, no floor. Pure free time — and you pay for it.",
+      schedule: {} },
+    barista: { name: "Café Barista", emoji: "☕", wage: 16, blurb: "Weekday mornings on the espresso machine.",
+      schedule: { Mon: ["Morning"], Tue: ["Morning"], Wed: ["Morning"], Thu: ["Morning"], Fri: ["Morning"] } },
+    retail: { name: "Retail Floor", emoji: "🛍️", wage: 18, blurb: "Weekday afternoons folding the same sweater.",
+      schedule: { Mon: ["Afternoon"], Tue: ["Afternoon"], Wed: ["Afternoon"], Thu: ["Afternoon"], Fri: ["Afternoon"] } },
+    server: { name: "Bistro Server", emoji: "🍝", wage: 22, blurb: "Late shifts, real tips — Wed through Sat nights.",
+      schedule: { Wed: ["Night"], Thu: ["Night"], Fri: ["Night"], Sat: ["Night"] } },
+    office: { name: "Office 9–5", emoji: "💼", wage: 26, blurb: "Weekdays, both morning and afternoon. The big floor, the small life.",
+      schedule: { Mon: ["Morning", "Afternoon"], Tue: ["Morning", "Afternoon"], Wed: ["Morning", "Afternoon"], Thu: ["Morning", "Afternoon"], Fri: ["Morning", "Afternoon"] } },
+  };
+
+  // Housing: per-day rent, tiered. `rooms` lists which HOME date rooms
+  // the place even has; `hotTub` flag gates the yard's hot-tub node. The
+  // cheapest is the start; you can buy up (or get pushed down if you
+  // can't pay). `impress` softly nudges her affection on a home date.
+  const HOUSES = {
+    studio: { name: "Studio Flat", emoji: "🛏️", rent: 3, tier: 0, blurb: "One room and a kitchenette. The bare minimum.",
+      rooms: ["living", "kitchen", "bedroom"], hotTub: false, impress: {} },
+    apartment: { name: "Apartment", emoji: "🏢", rent: 8, tier: 1, blurb: "Real rooms. Real windows. Still no yard.",
+      rooms: ["living", "kitchen", "bedroom"], hotTub: false, impress: { classy: 1 } },
+    house: { name: "House w/ Yard", emoji: "🏡", rent: 16, tier: 2, blurb: "Your own door, your own grass.",
+      rooms: ["living", "kitchen", "yard", "bedroom"], hotTub: false, impress: { classy: 2, generous: 1 } },
+    loft: { name: "Luxury Loft", emoji: "🌆", rent: 30, tier: 3, blurb: "View, yard, hot tub, the works.",
+      rooms: ["living", "kitchen", "yard", "bedroom"], hotTub: true, impress: { classy: 3, generous: 2, independent: 1 } },
+  };
+
+  // Cars: per-day lease. `drive:true` unlocks the venues you have to drive
+  // to (overlook, beach). `dislike` reads against her traits when she sees
+  // the car; `impress` reads with them.
+  const CARS = {
+    none: { name: "No Car", emoji: "🚶", lease: 0, tier: 0, blurb: "Bus passes and your own two feet.", drive: false, dislike: {}, impress: {} },
+    beater: { name: "Old Beater", emoji: "🚗", lease: 5, tier: 1, blurb: "Runs. Mostly. Don't look at the upholstery.", drive: true, dislike: { classy: 2 }, impress: {} },
+    sedan: { name: "Clean Sedan", emoji: "🚙", lease: 12, tier: 2, blurb: "Respectable, comfortable, anonymous.", drive: true, dislike: {}, impress: {} },
+    luxury: { name: "Luxury Coupe", emoji: "🏎️", lease: 24, tier: 3, blurb: "Turns heads in the parking lot. On purpose.", drive: true, dislike: {}, impress: { classy: 2 } },
   };
 
   // Shared pool of actual lines you can say. style → vibe vs character; probe → can surface a reveal.
@@ -804,7 +864,7 @@
   const TUNING = {
     barCap: 100, statCap: 25, baseDC: 10, dcPerInterest: 0.1,
     likedStyleBonus: 5, dislikedStylePenalty: 5, likedStatBonus: 2,
-    startMoney: 20, dailyAllowance: 12,
+    startMoney: 20,
     statModes: {
       easy: { label: "Take it easy", roll: [{ p: 1, min: 0.3, max: 0.6 }] },
       focused: { label: "Stay focused", roll: [{ p: 0.15, min: 0, max: 0 }, { p: 0.5, min: 0.3, max: 0.7 }, { p: 0.3, min: 1, max: 1 }, { p: 0.05, min: 2, max: 2 }] },
@@ -819,7 +879,9 @@
     kissReward: { romance: 16, attractionEvent: 6 }, kissFail: { romance: -10, affection: -5 },
     moveBaseDC: 11, movePerInterestMissing: 0.18, moveReward: { romance: 12 }, moveFail: { romance: -8, affection: -3 },
     dateRomance: 9, dateAffection: 5, dateAttractionEvent: 4, dateContinueMinQ: 0.2, homeContinueMinRomance: 45, maxDateVenues: 3, cheapBillPenalty: 5,
-    attractK: 6, attractBaseCap: 95, attractEventCap: 32, attractFloor: 8,
+    attrPhysK: 5.5, attrPhysCap: 60, attrInterestK: 4, attrVarianceSpan: 18,
+    attractBaseCap: 95, attractEventCap: 32,
+    carDislikeQ: 0.25,
     giftRomanceShare: 0.4, favoriteGiftMult: 2.2,
     pregChanceRaw: 0.35, pregTalkAfterDays: 3,
     textDC: 11, textReward: 4,
@@ -835,7 +897,8 @@
 
   window.GAMEDATA = {
     STATS, STAT_LABEL, STAT_SHORT, BARS, BAR_LABEL, BAR_SHORT, TRAITS,
-    BACKGROUNDS, SAYS, MOVE, LINES, ITEMS, SHOPS, LOCATIONS, PHASES,
+    BG_CATEGORIES, WEEKDAYS, JOBS, HOUSES, CARS,
+    SAYS, MOVE, LINES, ITEMS, SHOPS, LOCATIONS, PHASES,
     CHARACTERS, BILL, DATE_SCENES, DATE_END, HOME, OVERLOOK, BEACH, INTIMACY, PARTY, STAGES, TUNING,
   };
 })();
