@@ -900,6 +900,8 @@
     const post = a === "towel" || a === "underwear" || a === "suit" || a === "bare";
     switch (child.ustep) {
       case "begin": return a !== "bare";
+      case "jacket": return !post && !un.jacket;
+      case "camera": return a === "bare";
       case "shirt": return !post && !un.shirt;
       case "bra": return !post && !un.bra;
       case "chest": return !post && (un.bra || un.shirt);

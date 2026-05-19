@@ -176,7 +176,7 @@ let ovDepth = 0, ovSex = false, ovKiss = false, ovHard = false;
       if (n.roll.lose.hard) ovHard = true;
       if (n.roll.win.kiss || (n.roll.win.fx && n.roll.win.fx.kiss)) ovKiss = true;
     }
-    if (!n.sub && !n.roll && !n.rooms && !n.back) check(n.lines && n.lines.length, `OVERLOOK terminal no lines: ${n.label}`);
+    if (!n.sub && !n.roll && !n.rooms && !n.back && !n.hercall) check(n.lines && n.lines.length, `OVERLOOK terminal no lines: ${n.label}`);
   }
 })(D.OVERLOOK.rooms.flatMap((r) => r.actions), 0);
 check(ovDepth >= 3, `OVERLOOK needs deep nesting (photoshoot → tier → action); got ${ovDepth}`);
@@ -195,18 +195,27 @@ check(!ovLoc.dateSpot, "overlook must NOT be a DATE_SCENES dateSpot (it's the ne
   let shoot = null;
   (function find(ns) { for (const n of ns || []) { if (/real shoot/i.test(n.label || "")) shoot = n; if (n.sub) find(n.sub); if (n.actions) find(n.actions); } })(D.OVERLOOK.rooms);
   check(shoot && shoot.sub, "overlook needs the 'make it a real shoot' chain");
-  let deep = 0, rolls = 0;
-  (function w(ns, d) { deep = Math.max(deep, d); for (const n of ns || []) { if (n.roll) rolls++; if (n.sub) w(n.sub, d + 1); } })(shoot.sub, 1);
-  check(deep >= 6, `photoshoot must be a long chain; got depth ${deep}`);
-  check(rolls >= 10, `photoshoot must have lots of rolls; got ${rolls}`);
+  // It must be FLAT/non-linear: many choices at the top level, not a
+  // single descending chain.
+  const top = shoot.sub;
+  const rolls = top.filter((n) => n.roll).length;
+  check(top.length >= 12, `photoshoot must offer lots of choices at once; got ${top.length}`);
+  check(rolls >= 8, `photoshoot needs many independent rolls at the top; got ${rolls}`);
+  const garments = top.filter((n) => ["jacket", "shirt", "bra", "pants", "panties"].includes(n.ustep));
+  check(garments.length >= 5, `each clothing item must be its own top-level pick (got ${garments.length})`);
+  for (const g of garments) check(g.roll && g.roll.win && g.roll.win.fx && g.roll.win.fx.un, `garment ${g.ustep} must remove a layer on win`);
+  check(top.some((n) => n.ustep === "hercall" && n.hercall && n.hercall.safe && n.hercall.spicy), "photoshoot needs the 'let her decide' (safe/spicy) option");
+  // No deep linear stack of garment removals — depth stays shallow.
+  let deep = 0;
+  (function w(ns, d) { deep = Math.max(deep, d); for (const n of ns || []) if (n.sub) w(n.sub, d + 1); })(shoot.sub, 1);
+  check(deep <= 4, `photoshoot must not be a deep linear chain anymore; depth ${deep}`);
   const flat = JSON.stringify(shoot);
-  check(/jacket/i.test(flat) && /top comes off/i.test(flat) && /the bra/i.test(flat) && /skirt/i.test(flat) && /last of it|all of it/i.test(flat), "photoshoot needs a step per clothing item");
+  check(/jacket/i.test(flat) && /the top/i.test(flat) && /the bra/i.test(flat) && /skirt/i.test(flat) && /all of it/i.test(flat), "photoshoot needs a pick per clothing item");
   check(/hand me the camera|turns it on you/i.test(flat), "once nude she must offer to shoot you");
   check(/Let it all hang out/i.test(flat) && /Cover up/i.test(flat) && /Refuse/i.test(flat), "her-shooting-you needs let-it-hang/cover/refuse");
-  // The both-of-you / together option must sit UNDER the she-shoots-you node.
   let camNode = null;
   (function find(ns) { for (const n of ns || []) { if (/hand me the camera/i.test(n.label || "")) camNode = n; if (n.sub) find(n.sub); } })(shoot.sub);
-  check(camNode && /both of us|both of you|together/i.test(JSON.stringify(camNode)), "photos-together must come after she photographs you");
+  check(camNode && camNode.ustep === "camera" && /both of us|both of you|together/i.test(JSON.stringify(camNode)), "photos-together must come after she photographs you (camera node)");
   check(/"sex":"shoot"/.test(flat), "the together shot must route into the phone-aware sex block");
 })();
 // Phone-aware sex block + intimacy beats, and the contextual floor scene.
