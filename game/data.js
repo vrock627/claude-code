@@ -115,9 +115,10 @@
     book: { name: "Rare First Edition", emoji: "📕", price: 17, type: "gift", value: 6, desc: "Niche. The right person melts for it." },
     tickets: { name: "Concert Tickets", emoji: "🎫", price: 21, type: "gift", value: 6, desc: "Niche. The right person loses it." },
     wine: { name: "Bottle of Wine", emoji: "🍷", price: 14, type: "gift", value: 5, desc: "Loosens the evening. Romantic, a little bold." },
+    perfume: { name: "Perfume", emoji: "🌹", price: 19, type: "gift", value: 7, desc: "Personal. Niche. Lands very hard for the right person." },
     condom: { name: "Condoms", emoji: "🛡️", price: 6, type: "consumable", desc: "Just in case the night goes there. One gets used if it does." },
   };
-  const SHOPS = { gym: ["preworkout", "protein"], cafe: ["espresso", "chocolates"], library: ["book"], park: ["flowers"], mall: ["outfit", "watch", "course", "tickets", "chocolates", "flowers", "wine", "condom"] };
+  const SHOPS = { gym: ["preworkout", "protein"], cafe: ["espresso", "chocolates"], library: ["book"], park: ["flowers"], mall: ["outfit", "watch", "course", "tickets", "chocolates", "flowers", "wine", "perfume", "condom"] };
 
   const LOCATIONS = {
     gym: { name: "The Gym", emoji: "🏋️", blurb: "Clanking iron and mirror selfies.", arrive: "Sweat, rubber mats, someone grunting through a deadlift.",
@@ -229,6 +230,32 @@
         hot: ["Elena: \"I noticed you the second you walked in. I notice everything. You, more.\"", "Elena: \"Don't waste this. I don't hand it out.\""],
       },
       reveals: ["She names a wine's region blind, and will, entirely unprompted.", "She's curating a show she's privately terrified will flop.", "She collects single earrings she finds and never wears them.", "She thinks taste is just paying attention longer than everyone else."],
+    },
+    krystalle: {
+      name: "Krystalle", emoji: "💍", blurb: "Married. Romantic, spontaneous, witty. Reads people in a glance and forgets to read herself.",
+      likedStat: "strength", likedStyle: "smooth", dislikedStyle: "brash", favoriteGift: "perfume",
+      schedule: { Morning: "cafe", Afternoon: "park", Night: "restaurant" },
+      hint: "Married, and she means it — mostly. Realness, banter, confidence without the strut. Slowest burn in the game; the moment exists, but you have to earn it.",
+      attractProfile: { strength: 0.4, style: 0.3, charisma: 0.2, intelligence: 0.1 },
+      barWeights: { affection: 0.45, romance: 0.3, attraction: 0.2, libido: 0.05 },
+      libidoRange: [4, 22], decay: { affection: 1, romance: 5 },
+      traitAffinity: { sincere: 3, generous: 2, classy: 2, playful: 2, adventurous: 1, independent: 0 },
+      gates: { homeRomance: 78, intimacyComposite: 82, partyPrivateInterest: 78 },
+      marriage: { active: true, anxietyAt: 50 },
+      opens: {
+        cold: ["Krystalle twists her ring on her finger without thinking. \"Hi. Hi — sorry, I'm somewhere else today.\"", "Krystalle, half a step back: \"You're sweet to come over. I'm a little spoken-for, you know that, right?\""],
+        neutral: ["Krystalle, brightening: \"Oh — hi. Okay. Distract me, I dare you.\"", "Krystalle: \"You always show up when my brain's loud. That's a talent.\""],
+        warm: ["Krystalle leans her chin in her hand. \"Tell me a true thing. I'll trade you one back.\"", "Krystalle: \"You know I look forward to this part of my day. That's a problem I'm not solving right now.\""],
+        hot: ["Krystalle, quieter: \"I shouldn't be this glad to see you. I know that. Sit down anyway.\"", "Krystalle: \"I keep telling myself I'm just being friendly. I'm a bad liar about a lot of things, apparently.\""],
+      },
+      reveals: [
+        "Half Filipino, half white — her lola taught her three swears and one prayer and she uses all of them.",
+        "Married three years. Talks about him fondly and rarely, which is its own answer.",
+        "Reads people in a glance and trusts it; reads herself in a glance and immediately questions it.",
+        "Owns up to anxiety attacks — the spontaneous streak is partly because sitting still feels worse.",
+        "Will be carried up a single stair without complaint. Will pretend she didn't ask to be.",
+        "Tells you, in passing, that she can read a man who's full of himself inside ten seconds. You believe her.",
+      ],
     },
   };
 

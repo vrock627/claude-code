@@ -4,6 +4,7 @@ const fs = require("fs"), path = require("path"), vm = require("vm");
 const sandbox = { window: {} };
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "data.js"), "utf8"), sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "krystalle.js"), "utf8"), sandbox);
 const D = sandbox.window.GAMEDATA, T = D.TUNING;
 
 const errors = [];
@@ -614,6 +615,83 @@ const CHARS = Object.keys(D.CHARACTERS);
 check(CHARS.length >= 5, `expected >=5 characters, got ${CHARS.length}`);
 const favs = CHARS.map((id) => D.CHARACTERS[id].favoriteGift);
 check(new Set(favs).size === favs.length, "favorite gifts should be distinct per character");
+
+// --- Krystalle: married, voice-overridden, hardest to sleep with. ---
+(function () {
+  const K = D.CHARACTERS.krystalle;
+  check(K, "krystalle missing");
+  check(K.gates && K.gates.homeRomance > T.homeContinueMinRomance && K.gates.homeRomance < 100, "krystalle.gates.homeRomance should raise the bar");
+  check(K.gates.intimacyComposite >= 75, "krystalle.gates.intimacyComposite should be high");
+  check(K.libidoRange[1] < 30, "krystalle libido ceiling must be tight");
+  check(K.marriage && K.marriage.active, "krystalle.marriage.active expected");
+  check(K.anxietyBeat && K.anxietyBeat.q && K.anxietyBeat.opts && K.anxietyBeat.opts.length >= 3, "krystalle.anxietyBeat shape");
+  check(K.anxietyBeat.opts.some((o) => o.clears), "anxiety beat needs at least one clearing path");
+  check(typeof K.specialEntry === "string" && K.specialEntry.length > 40, "krystalle.specialEntry copy missing");
+  // Voice tree shape and parity checks.
+  check(K.voice && K.voice.venues && K.voice.places && K.voice.party && K.voice.intimacy, "krystalle.voice tree missing branches");
+  // Every overridden venue beat must have opt-count parity with the
+  // shared DATE_SCENES — that's how index-keyed lookup stays safe.
+  for (const [vid, v] of Object.entries(K.voice.venues)) {
+    check(D.DATE_SCENES[vid], `krystalle voice references unknown venue ${vid}`);
+    if (Array.isArray(v.beats)) {
+      check(v.beats.length === D.DATE_SCENES[vid].beats.length, `krystalle ${vid}: beat count mismatch`);
+      v.beats.forEach((b, i) => {
+        const src = D.DATE_SCENES[vid].beats[i];
+        check(b.opts.length === src.opts.length, `krystalle ${vid} beat ${i}: opt count mismatch (${b.opts.length} vs ${src.opts.length})`);
+        for (const o of b.opts) check(o.said || o.line, `krystalle ${vid} beat ${i}: opt missing said/line`);
+      });
+    }
+    if (v.bill) {
+      const billOpts = D.DATE_SCENES[vid].bill && D.DATE_SCENES[vid].bill.options;
+      if (billOpts) for (const bid of billOpts) if (v.bill.lines && v.bill.lines[bid]) check(typeof v.bill.lines[bid] === "string", `krystalle ${vid} bill ${bid} bad type`);
+    }
+  }
+  // HOME/OVERLOOK/BEACH room keys + action labels must exist on the
+  // shared trees. Walks every key under places.<place>.rooms.
+  function collectLabels(tree) {
+    const out = new Set();
+    (function walk(ns) { for (const n of ns || []) { if (n.label) out.add(n.label); if (n.sub) walk(n.sub); if (n.actions) walk(n.actions); } })(tree);
+    return out;
+  }
+  for (const [pid, p] of Object.entries(K.voice.places)) {
+    const tree = pid === "overlook" ? D.OVERLOOK : pid === "beach" ? D.BEACH : D.HOME;
+    check(tree, `krystalle voice references unknown place ${pid}`);
+    const roomKeys = new Set(tree.rooms.map((r) => r.key));
+    if (p.rooms) for (const [rk, r] of Object.entries(p.rooms)) {
+      check(roomKeys.has(rk), `krystalle places.${pid}: unknown room ${rk}`);
+      const room = tree.rooms.find((x) => x.key === rk);
+      const labels = collectLabels(room.actions);
+      if (r.actions) for (const lbl of Object.keys(r.actions)) check(labels.has(lbl), `krystalle places.${pid}.${rk}: unknown action label "${lbl}"`);
+    }
+  }
+  // INTIMACY phase parity by source order.
+  const PHASES = ["open", "leading", "intensity", "finish"];
+  PHASES.forEach((ph, i) => {
+    const v = K.voice.intimacy[ph], src = D.INTIMACY.beats[i];
+    check(Array.isArray(v) && v.length === src.opts.length, `krystalle intimacy.${ph}: opt count ${v && v.length} vs ${src.opts.length}`);
+    for (const o of v) check(o.said || o.line, `krystalle intimacy.${ph}: opt missing said/line`);
+  });
+  check(Array.isArray(K.voice.intimacy.close) && K.voice.intimacy.close.length === D.INTIMACY.close.opts.length, "krystalle intimacy.close opt parity");
+  // Party pool shapes.
+  check(Array.isArray(K.voice.party.npcBeats) && K.voice.party.npcBeats.every((b) => /\{g\}/.test(b)), "krystalle party.npcBeats need {g}");
+  check(K.voice.party.bodyShot && K.voice.party.bodyShot.win && K.voice.party.bodyShot.lose, "krystalle party.bodyShot shape");
+  check(K.voice.party.danceLine && K.voice.party.danceLine.casual && K.voice.party.danceLine.dirty && K.voice.party.danceLine.handsy, "krystalle party.danceLine shape");
+  // Earned-moment: composite reachable in principle. Quick sim — give her
+  // a max favored build, max all bars, check composite >= the gate.
+  (function () {
+    const c = K, build = { strength: 9, style: 9, intelligence: 0, charisma: 0 };
+    const cap = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+    function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
+    const phys = cap((build.strength + build.style) * (T.attrPhysK / 2), 0, T.attrPhysCap);
+    let interest = 0; for (const s of D.STATS) interest += (c.attractProfile[s] || 0) * build[s]; interest *= T.attrInterestK;
+    const span = T.attrVarianceSpan || 0, spread = span ? ((hashStr("krystalle") % (span + 1)) - Math.floor(span / 2)) : 0;
+    const attr = cap(Math.round(phys + interest + spread), 0, T.attractBaseCap);
+    // Max bars (100 each); composite = sum(weight * 100) ≈ 100.
+    let comp = 0; for (const b of D.BARS) comp += (c.barWeights[b] || 0) * (b === "attraction" ? attr : 100);
+    comp = Math.round(comp);
+    check(comp >= c.gates.intimacyComposite, `krystalle: even max build/bars can't hit her intimacyComposite gate (${comp} vs ${c.gates.intimacyComposite})`);
+  })();
+})();
 
 console.log("BG categories:", D.BG_CATEGORIES.map((c) => `${c.id}(${c.sub})=[${c.opts.map((o) => o.id).join("/")}]`).join(" · "));
 console.log("Jobs:", Object.keys(D.JOBS).join(", "));

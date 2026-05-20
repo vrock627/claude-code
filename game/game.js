@@ -33,6 +33,20 @@
 
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
   const phaseName = () => D.PHASES[state.phaseIndex];
+  // Per-character voice lookup: voiceFor("krystalle","venues.cafe.beats.0.opts.1.said")
+  // returns null when any segment is missing, so callers can fall back.
+  function voiceFor(id, path) {
+    const v = D.CHARACTERS[id] && D.CHARACTERS[id].voice; if (!v) return null;
+    let n = v; for (const seg of String(path).split(".")) { if (n == null) return null; n = n[seg]; }
+    return n == null ? null : n;
+  }
+  // Per-character gate override: gateFor("krystalle","homeRomance",45) → her
+  // override if present, else fallback.
+  function gateFor(id, key, fallback) {
+    const g = D.CHARACTERS[id] && D.CHARACTERS[id].gates;
+    return g && typeof g[key] === "number" ? g[key] : fallback;
+  }
+  const replaceN = (s, name) => String(s).replace(/\{n\}/g, name);
   const weekdayName = () => D.WEEKDAYS[((state.day - 1) % 7 + 7) % 7];
   const jobDef = () => D.JOBS[state.job] || D.JOBS.freelance;
   const houseDef = () => D.HOUSES[state.owned.house] || D.HOUSES.studio;
@@ -737,13 +751,78 @@
   function renderDateBeat() {
     renderHud(); clearScreen();
     const dt = state.date, c = D.CHARACTERS[dt.id], scene = D.DATE_SCENES[dt.venue];
+    // Anxiety beat — fires once mid-date when she crosses the threshold.
+    if (maybeAnxietyBeat(dt.id, "date")) return;
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `🍷 ${D.LOCATIONS[dt.venue].name} · with ${c.name}`));
-    if (dt.beat === 0) w.appendChild(el("p", "char-line", scene.intro));
+    if (dt.beat === 0) {
+      const vIntro = voiceFor(dt.id, `venues.${dt.venue}.intro`);
+      w.appendChild(el("p", "char-line", vIntro || scene.intro));
+    }
     const b = scene.beats[dt.beat];
-    w.appendChild(el("p", "talk-prompt", b.q));
+    const vQ = voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.q`);
+    w.appendChild(el("p", "talk-prompt", vQ || b.q));
     const o = el("div", "choices");
-    for (const opt of b.opts) o.appendChild(button(opt.text, () => { dt.picks.push(opt); dt.beat += 1; dt.beat >= scene.beats.length ? afterVenueBeats() : renderDateBeat(); }, "choice"));
+    b.opts.forEach((opt, i) => o.appendChild(button(opt.text, () => {
+      dt.picks.push(opt);
+      const vSaid = voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.opts.${i}.said`);
+      const vLine = voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.opts.${i}.line`);
+      const advance = () => { dt.beat += 1; dt.beat >= scene.beats.length ? afterVenueBeats() : renderDateBeat(); };
+      if (vSaid || vLine) return renderVoiceInterstitial(c.name, vSaid, vLine, advance);
+      advance();
+    }, "choice")));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  // Light interstitial between a player choice and the next beat — shows
+  // her response (said) and the narrator's read (line) on one Continue.
+  function renderVoiceInterstitial(name, said, line, next) {
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `${name}`));
+    if (said) w.appendChild(el("p", "char-line", said));
+    if (line) w.appendChild(el("p", "result-line", line));
+    const o = el("div", "choices");
+    o.appendChild(button("Continue", next, "primary"));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  // One-time mid-arc anxiety beat. Returns true if it rendered (caller
+  // should bail). Krystalle-only via her marriage.anxietyAt threshold.
+  function maybeAnxietyBeat(id, context) {
+    const c = D.CHARACTERS[id]; if (!c || !c.marriage || !c.marriage.active || !c.anxietyBeat) return false;
+    const flags = state.flags || (state.flags = {});
+    const fk = id + "_anxietyDone";
+    if (flags[fk]) return false;
+    if (composite(id) < (c.marriage.anxietyAt || 50)) return false;
+    if (context === "date") {
+      const dt = state.date; if (!dt) return false;
+      if (dt.beat < 1) return false; // not on the very first beat
+    }
+    renderAnxietyBeat(id, context);
+    return true;
+  }
+  function renderAnxietyBeat(id, context) {
+    renderHud(); clearScreen();
+    const c = D.CHARACTERS[id], A = c.anxietyBeat, w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `${c.emoji} ${c.name}`));
+    w.appendChild(el("p", "talk-prompt", A.q));
+    const o = el("div", "choices");
+    A.opts.forEach((opt, i) => o.appendChild(button(opt.said, () => {
+      const flags = state.flags || (state.flags = {});
+      flags[id + "_anxietyDone"] = true;
+      if (opt.clears) flags[id + "_anxietyCleared"] = true;
+      adjustBar(id, "affection", opt.aff || 0); adjustBar(id, "romance", opt.rom || 0);
+      const resumeAfter = () => {
+        if (context === "date") renderDateBeat();
+        else if (context === "party") partyAfter();
+        else advancePhase();
+      };
+      renderResult({
+        title: opt.clears ? "Something lands" : (opt.aff < 0 ? "Cooler than it should be" : "Recovered, mostly"),
+        lines: [opt.line, `Affection ${opt.aff >= 0 ? "+" : ""}${opt.aff || 0} · Romance ${opt.rom >= 0 ? "+" : ""}${opt.rom || 0}`],
+        tone: opt.clears ? "good" : (opt.aff < 0 ? "bad" : "neutral"),
+        then: resumeAfter, thenLabel: "Continue",
+      });
+    }, opt.clears ? "choice move" : "choice")));
     w.appendChild(o); screen().appendChild(w);
   }
   function afterVenueBeats() {
@@ -756,23 +835,27 @@
     const dt = state.date, scene = D.DATE_SCENES[dt.venue], cost = D.LOCATIONS[dt.venue].dateCost;
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `The bill — ${D.LOCATIONS[dt.venue].name}`));
-    w.appendChild(el("p", "char-line", `It comes to about $${cost}. She watches to see what you do — everyone always does.`));
+    const billIntro = voiceFor(dt.id, `venues.${dt.venue}.bill.intro`);
+    w.appendChild(el("p", "char-line", billIntro || `It comes to about $${cost}. She watches to see what you do — everyone always does.`));
     const o = el("div", "choices");
     let anyAffordable = false;
     for (const bid of scene.bill.options) {
       const bopt = D.BILL[bid], due = Math.round(cost * bopt.costMul);
       const label = `${bopt.text}${due ? `  (−$${due})` : "  ($0)"}`;
       if (due > state.money) o.appendChild(button(`${label} — can't afford`, null, "choice", true));
-      else { anyAffordable = true; o.appendChild(button(label, () => resolveVenue(due, bopt), "choice")); }
+      else { anyAffordable = true; o.appendChild(button(label, () => resolveVenue(due, bopt, bid), "choice")); }
     }
     if (!anyAffordable)
-      o.appendChild(button("Come up short — she quietly covers it (ouch)", () => resolveVenue(0, { trait: "independent", mag: 1, cheap: true }), "choice subtle"));
+      o.appendChild(button("Come up short — she quietly covers it (ouch)", () => resolveVenue(0, { trait: "independent", mag: 1, cheap: true }, "cheap"), "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
   }
-  function resolveVenue(due, bopt) {
+  function resolveVenue(due, bopt, billKey) {
     const dt = state.date, c = D.CHARACTERS[dt.id];
     state.money -= due; dt.spent += due;
     if (bopt) dt.picks.push({ trait: bopt.trait, mag: bopt.mag });
+    // Stash her voice line for the chosen bill option (if any), surfaced
+    // into the venue result lines below.
+    if (billKey) dt._billVoice = voiceFor(dt.id, `venues.${dt.venue}.bill.lines.${billKey}`);
     let score = 0, mag = 0;
     for (const p of dt.picks) { score += (c.traitAffinity[p.trait] || 0) * p.mag; mag += p.mag; }
     let q = mag ? score / mag : 0;
@@ -796,9 +879,11 @@
     if (q > 0.5) adjustBar(dt.id, "attraction", T.dateAttractionEvent);
     dt.totRom += rom; dt.totAff += aff; dt.venuesDone += 1; dt.used.push(dt.venue); dt.bestQ = Math.max(dt.bestQ, q);
     const vn = D.LOCATIONS[dt.venue].name;
+    const billVoice = dt._billVoice; dt._billVoice = null;
     renderResult({
       title: q > 1 ? `${vn}: a great stretch` : q > 0 ? `${vn}: going well` : q > -0.5 ? `${vn}: just okay` : `${vn}: stiff`,
-      lines: [q > 0.6 ? `${c.name} is fully in this. You can feel it.` : q < -0.3 ? `${c.name} is being polite, which is its own kind of answer.` : `${c.name} seems content to see where this goes.`,
+      lines: [
+        billVoice || (q > 0.6 ? `${c.name} is fully in this. You can feel it.` : q < -0.3 ? `${c.name} is being polite, which is its own kind of answer.` : `${c.name} seems content to see where this goes.`),
         `Romance ${rom >= 0 ? "+" : ""}${rom} · Affection ${aff >= 0 ? "+" : ""}${aff}${bopt && bopt.cheap ? " · the cheap move landed badly" : ""}${carLine ? "  " + carLine : ""}`,
         dt.spent ? `Spent so far: $${dt.spent}.` : "No bill here — just the night."],
       tone: q > 0 ? "good" : q > -0.5 ? "neutral" : "bad", then: () => offerContinue(q), thenLabel: "And then…",
@@ -808,7 +893,7 @@
     const dt = state.date, c = D.CHARACTERS[dt.id], rom = barVal(dt.id, "romance");
     const canMore = dt.venuesDone < T.maxDateVenues && lastQ >= T.dateContinueMinQ;
     const venues = Object.entries(D.LOCATIONS).filter(([lid, loc]) => D.DATE_SCENES[lid] && loc.dateSpot && !dt.used.includes(lid));
-    const homeOK = D.HOME && !dt.used.includes("home") && rom >= T.homeContinueMinRomance;
+    const homeOK = D.HOME && !dt.used.includes("home") && rom >= gateFor(dt.id, "homeRomance", T.homeContinueMinRomance);
     const overlookOK = D.OVERLOOK && !dt.used.includes("overlook");
     const beachOK = D.BEACH && !dt.used.includes("beach");
     if (!canMore || (!venues.length && !homeOK && !overlookOK && !beachOK)) return renderDateEnd();
@@ -904,7 +989,16 @@
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `${placeIcon()} ${placeName()} · with ${c.name}`));
-    w.appendChild(el("p", "char-line", subN(placeDef().intro, c.name)));
+    const vIntro = voiceFor(dt.id, `places.${place}.intro`);
+    w.appendChild(el("p", "char-line", subN(vIntro || placeDef().intro, c.name)));
+    // Earned-moment override: when she's at the intimacy composite gate
+    // and the anxiety beat resolved well, surface specialEntry once on
+    // home entry. Stops the "hardest to bed" character feeling like a wall.
+    const flags = state.flags || (state.flags = {});
+    if (place === "home" && firstEntry && c.specialEntry && c.gates && composite(dt.id) >= c.gates.intimacyComposite && flags[dt.id + "_anxietyCleared"] && !flags[dt.id + "_specialEntryDone"]) {
+      flags[dt.id + "_specialEntryDone"] = true;
+      w.appendChild(el("p", "char-line", subN(c.specialEntry, c.name)));
+    }
     for (const l of sideLines) w.appendChild(el("p", "char-line dim", l));
     w.appendChild(button(place === "overlook" ? "Take it in" : place === "beach" ? "Down to the sand" : "Show her in", renderHomeRooms, "primary"));
     screen().appendChild(w);
@@ -945,7 +1039,16 @@
     const room = placeDef().rooms[roomIdx], node = homeNodeAt(roomIdx, path);
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `${placeIcon()} ${room.name} · with ${c.name}`));
-    const enter = node.enter || (path.length === 0 ? room.enter : null);
+    let enter = node.enter || (path.length === 0 ? room.enter : null);
+    // Voice override: per-room enter (path 0) or per-action enter (label
+    // lookup, when descending into a node with its own enter line).
+    if (path.length === 0) {
+      const v = voiceFor(dt.id, `places.${dt.place}.rooms.${room.key}.enter`);
+      if (v) enter = v;
+    } else if (node.label) {
+      const v = voiceFor(dt.id, `places.${dt.place}.rooms.${room.key}.actions.${node.label}`);
+      if (v) enter = v;
+    }
     if (enter) w.appendChild(el("p", "char-line", subN(enter, c.name)));
     const sl = homeStateLine();
     if (sl) w.appendChild(el("p", "char-line dim", sl));
@@ -997,16 +1100,27 @@
   }
   function homeResolveNode(node, back) {
     const dt = state.date, id = dt.id, c = D.CHARACTERS[id];
+    // Voice override on per-action narration: only on win, only when she
+    // has a line for this label at the current place's current room.
+    const room = placeDef().rooms.find((r) => containsAction(r, node));
+    const vLine = node.label && room ? voiceFor(id, `places.${dt.place}.rooms.${room.key}.actions.${node.label}`) : null;
     if (node.roll) {
       const r = nodeRoll(node, id), br = r.ok ? node.roll.win : node.roll.lose;
       const roll = { d20: r.roll, stat: r.statLbl ? `${r.statLbl} ${r.gauge}` : `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
       if (!r.ok && br.hard) return homeBail(br, roll);
       if (r.ok && br.sex) return renderSexChoice(back, typeof br.sex === "string" ? br.sex : null);
       homeAccrue(br.fx || {});
-      return renderResult({ title: r.ok ? "She's right there" : "Not quite there", roll, lines: weaveAttire(br.lines, br.fx).map((l) => subN(l, c.name)), tone: r.ok ? "good" : "bad", then: back, thenLabel: "Back" });
+      const lines = r.ok && vLine ? [vLine] : weaveAttire(br.lines, br.fx).map((l) => subN(l, c.name));
+      return renderResult({ title: r.ok ? "She's right there" : "Not quite there", roll, lines: lines.map((l) => subN(l, c.name)), tone: r.ok ? "good" : "bad", then: back, thenLabel: "Back" });
     }
     homeAccrue(node.fx || {});
-    renderResult({ title: "…", lines: weaveAttire(node.lines, node.fx).map((l) => subN(l, c.name)), tone: "good", then: back, thenLabel: "Back" });
+    const lines = vLine ? [vLine] : weaveAttire(node.lines, node.fx).map((l) => subN(l, c.name));
+    renderResult({ title: "…", lines: lines.map((l) => subN(l, c.name)), tone: "good", then: back, thenLabel: "Back" });
+  }
+  function containsAction(node, target) {
+    const ch = node.actions || node.sub; if (!ch) return false;
+    for (const c of ch) { if (c === target) return true; if (containsAction(c, target)) return true; }
+    return false;
   }
   function homeResolve(child, roomIdx, path) {
     if (child.chance) return homeSwim(roomIdx, path);
@@ -1050,9 +1164,11 @@
     }
     if (dt.home.swim === "suit") {
       homeAccrue(sw.hasSuit.fx);
-      return renderResult({ title: "Into the tub", lines: sw.hasSuit.lines.map((l) => subN(l, c.name)), tone: "good", then: () => swimList(sw.hasSuit.swimNext || "inTub", roomIdx), thenLabel: "…in the water" });
+      const vSuit = voiceFor(dt.id, `places.${dt.place}.swim.hasSuit`);
+      return renderResult({ title: "Into the tub", lines: [vSuit || sw.hasSuit.lines[0]].map((l) => subN(l, c.name)), tone: "good", then: () => swimList(sw.hasSuit.swimNext || "inTub", roomIdx), thenLabel: "…in the water" });
     }
-    swimNodes(sw.noSuit, sw.ask, back, roomIdx, "The hot tub");
+    const vAsk = voiceFor(dt.id, `places.${dt.place}.swim.ask`);
+    swimNodes(sw.noSuit, vAsk || sw.ask, back, roomIdx, "The hot tub");
   }
   function swimList(name, roomIdx) {
     swimNodes(swimNamed(name), SWIM_ENTER[name] || null, () => renderHomeMenu(roomIdx, []), roomIdx, name === "getOut" ? "Drying off" : "In the tub");
@@ -1081,21 +1197,28 @@
     w.appendChild(o); screen().appendChild(w);
   }
   function swimPick(n, selfBack, parentBack, roomIdx, head) {
-    const c = D.CHARACTERS[state.date.id];
+    const dt = state.date, c = D.CHARACTERS[dt.id];
     const descend = (sub) => swimNodes(sub, n.enter, selfBack, roomIdx, head);
+    // Voice override for hot-tub actions — swim nodes live under
+    // placeDef().swim and aren't in a room; key them under the "swim" key.
+    const vLine = n.label ? voiceFor(dt.id, `places.${dt.place}.swim.inTub.${n.label}`)
+                          || voiceFor(dt.id, `places.${dt.place}.swim.getOut.${n.label}`)
+                          || voiceFor(dt.id, `places.${dt.place}.swim.noSuit.${n.label}`) : null;
     if (n.roll) {
-      const r = homeRoll(state.date.id, n.roll.dc), br = r.ok ? n.roll.win : n.roll.lose;
+      const r = homeRoll(dt.id, n.roll.dc), br = r.ok ? n.roll.win : n.roll.lose;
       const roll = { d20: r.roll, stat: `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
       if (!r.ok && br.hard) return homeBail(br, roll);
       if (r.ok && br.sex) return renderSexChoice(selfBack, typeof br.sex === "string" ? br.sex : null);
       homeAccrue(br.fx || {});
       const nextOnWin = r.ok && n.roll.swimNext ? () => swimList(n.roll.swimNext, roomIdx) : (r.ok && n.sub ? () => descend(n.sub) : selfBack);
-      return renderResult({ title: r.ok ? "She's right there" : "Not quite there", roll, lines: weaveAttire(br.lines, br.fx).map((l) => subN(l, c.name)), tone: r.ok ? "good" : "bad", then: r.ok ? nextOnWin : selfBack, thenLabel: r.ok && (n.roll.swimNext || n.sub) ? "…then" : "Back" });
+      const lines = r.ok && vLine ? [vLine] : weaveAttire(br.lines, br.fx).map((l) => subN(l, c.name));
+      return renderResult({ title: r.ok ? "She's right there" : "Not quite there", roll, lines: lines.map((l) => subN(l, c.name)), tone: r.ok ? "good" : "bad", then: r.ok ? nextOnWin : selfBack, thenLabel: r.ok && (n.roll.swimNext || n.sub) ? "…then" : "Back" });
     }
-    if (n.swimNext) { homeAccrue(n.fx || {}); return renderResult({ title: "…", lines: (n.lines || ["You both get in."]).map((l) => subN(l, c.name)), tone: "good", then: () => swimList(n.swimNext, roomIdx), thenLabel: "…in the water" }); }
+    if (n.swimNext) { homeAccrue(n.fx || {}); return renderResult({ title: "…", lines: (vLine ? [vLine] : (n.lines || ["You both get in."])).map((l) => subN(l, c.name)), tone: "good", then: () => swimList(n.swimNext, roomIdx), thenLabel: "…in the water" }); }
     if (n.sub) return descend(n.sub);
     homeAccrue(n.fx || {});
-    renderResult({ title: "…", lines: weaveAttire(n.lines, n.fx).map((l) => subN(l, c.name)), tone: "good", then: selfBack, thenLabel: "Back" });
+    const lines = vLine ? [vLine] : weaveAttire(n.lines, n.fx).map((l) => subN(l, c.name));
+    renderResult({ title: "…", lines: lines.map((l) => subN(l, c.name)), tone: "good", then: selfBack, thenLabel: "Back" });
   }
   function homeBail(br, roll) {
     const dt = state.date, id = dt.id, c = D.CHARACTERS[id];
@@ -1209,7 +1332,8 @@
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `Just the two of you · ${c.name}`));
-    w.appendChild(el("p", "char-line", subN(sx.ask, c.name)));
+    const vAsk = voiceFor(dt.id, `places.${dt.place}.sexAsk`);
+    w.appendChild(el("p", "char-line", subN(vAsk || sx.ask, c.name)));
     const have = (state.inventory.condom || 0) > 0;
     const o = el("div", "choices");
     o.appendChild(button(have ? `Use a condom  (have ${state.inventory.condom})` : "Use a condom — none in your bag", have ? () => sexResolve("condom", back, variant) : null, "choice", !have));
@@ -1219,15 +1343,28 @@
   }
   function sexResolve(kind, back, variant) {
     const dt = state.date, id = dt.id, c = D.CHARACTERS[id], sx = sexBlock(variant);
-    if (kind === "back") { homeAccrue(sx.back.fx); return renderResult({ title: "Not tonight, the rest", lines: sx.back.lines.map((l) => subN(l, c.name)), tone: "good", then: back, thenLabel: "Back" }); }
-    if (kind === "condom") { state.inventory.condom -= 1; homeAccrue(sx.condom.fx); return renderIntimacy(id, sx.condom.lines, renderDateEnd, false, variant); }
+    if (kind === "back") {
+      homeAccrue(sx.back.fx);
+      const vBack = voiceFor(id, `places.${dt.place}.sexBack`);
+      return renderResult({ title: "Not tonight, the rest", lines: (vBack ? [vBack] : sx.back.lines).map((l) => subN(l, c.name)), tone: "good", then: back, thenLabel: "Back" });
+    }
+    if (kind === "condom") {
+      state.inventory.condom -= 1; homeAccrue(sx.condom.fx);
+      const vCon = voiceFor(id, `places.${dt.place}.sexCondom`);
+      return renderIntimacy(id, vCon ? [vCon] : sx.condom.lines, renderDateEnd, false, variant);
+    }
     const ta = c.traitAffinity;
     const mod = Math.floor(barVal(id, "libido") / 12) + ((ta.adventurous || 0) > 0 ? 2 : 0) - ((ta.classy || 0) > 0 ? 2 : 0) - ((ta.sincere || 0) > 0 ? 1 : 0);
     const r = homeRoll(id, sx.raw.dc - mod);
     const roll = { d20: r.roll, stat: `read ${r.gauge} · her ${mod >= 0 ? "+" : ""}${mod}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
-    if (!r.ok) return homeBail(sx.raw.lose, roll);
+    if (!r.ok) {
+      const vLose = voiceFor(id, `places.${dt.place}.sexRawLose`);
+      const loseBlock = vLose ? Object.assign({}, sx.raw.lose, { lines: [vLose] }) : sx.raw.lose;
+      return homeBail(loseBlock, roll);
+    }
     homeAccrue(sx.raw.win.fx);
-    renderIntimacy(id, sx.raw.win.lines, renderDateEnd, true, variant);
+    const vWin = voiceFor(id, `places.${dt.place}.sexRawWin`);
+    renderIntimacy(id, vWin ? [vWin] : sx.raw.win.lines, renderDateEnd, true, variant);
   }
   // ---- shared, non-graphic intimacy beats (home date + party slip-away) ----
   function intimFx(id, fx) {
@@ -1250,24 +1387,35 @@
   function renderIntimacyBeat() {
     const im = state.intim, c = D.CHARACTERS[im.id], F = D.INTIMACY.finish;
     const beats = (im.beatsKey && D.INTIMACY[im.beatsKey] && D.INTIMACY[im.beatsKey].beats) || D.INTIMACY.beats;
+    // Map source-order beat index → her voice phase name.
+    const PHASES = ["open", "leading", "intensity", "finish"];
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `The rest of the night · ${c.name}`));
     for (const l of im.log.slice(-3)) w.appendChild(el("p", "char-line", subN(l, c.name)));
     const o = el("div", "choices");
     if (im.beat < beats.length) {
-      const node = beats[im.beat];
+      const node = beats[im.beat], phase = PHASES[im.beat];
       w.appendChild(el("p", "talk-prompt", node.q));
-      node.opts.forEach((opt) => o.appendChild(button(opt.label, () => {
-        intimFx(im.id, opt.fx); im.log.push(opt.line); im.beat += 1; renderIntimacyBeat();
+      node.opts.forEach((opt, i) => o.appendChild(button(opt.label, () => {
+        intimFx(im.id, opt.fx);
+        const vSaid = phase ? voiceFor(im.id, `intimacy.${phase}.${i}.said`) : null;
+        const vLine = phase ? voiceFor(im.id, `intimacy.${phase}.${i}.line`) : null;
+        if (vSaid) im.log.push(vSaid);
+        im.log.push(vLine || opt.line);
+        im.beat += 1; renderIntimacyBeat();
       }, "choice")));
     } else if (im.raw && !im.finishDone) {
       w.appendChild(el("p", "talk-prompt", F.q));
       o.appendChild(button(F.pull.label, () => {
-        intimFx(im.id, F.pull.fx); im.log.push(F.pull.line); im.finishDone = true; renderIntimacyBeat();
+        intimFx(im.id, F.pull.fx);
+        const vPull = voiceFor(im.id, "intimacy.pull");
+        im.log.push(vPull || F.pull.line); im.finishDone = true; renderIntimacyBeat();
       }, "choice"));
       o.appendChild(button(F.inside.label, () => {
-        intimFx(im.id, F.inside.fx); im.log.push(F.inside.line); im.finishDone = true;
+        intimFx(im.id, F.inside.fx);
+        const vIn = voiceFor(im.id, "intimacy.inside");
+        im.log.push(vIn || F.inside.line); im.finishDone = true;
         if (!state.preg[im.id] && Math.random() < T.pregChanceRaw)
           state.preg[im.id] = { sinceDay: state.day, talked: false, status: null };
         renderIntimacyBeat();
@@ -1276,10 +1424,16 @@
       const ctx = im.beatsKey && D.INTIMACY[im.beatsKey] && D.INTIMACY[im.beatsKey].close;
       const node = ctx || D.INTIMACY.close;
       w.appendChild(el("p", "talk-prompt", node.q));
-      node.opts.forEach((opt) => {
+      node.opts.forEach((opt, i) => {
         if (opt.again && (im.rounds || 0) >= 3) return; // sanity cap on round N
         o.appendChild(button(opt.label, () => {
-          intimFx(im.id, opt.fx); im.log.push(opt.line); im.closeTone = opt.tone || "good";
+          intimFx(im.id, opt.fx);
+          // Only override the default INTIMACY.close — not the variant
+          // close blocks (party/floor/shoot) which have their own copy.
+          const vClose = !ctx ? voiceFor(im.id, `intimacy.close.${i}`) : null;
+          if (vClose && vClose.said) im.log.push(vClose.said);
+          im.log.push((vClose && vClose.line) || opt.line);
+          im.closeTone = opt.tone || "good";
           if (opt.again) { im.rounds = (im.rounds || 0) + 1; im.beat = 0; im.finishDone = false; renderIntimacyBeat(); }
           else finishIntimacy();
         }, opt.again ? "choice move" : "choice"));
@@ -1388,7 +1542,8 @@
   function partyBuyHer(id) {
     const c = D.CHARACTERS[id];
     adjustBar(id, "libido", T.partyDrinkLibido); adjustBar(id, "romance", 4); adjustBar(id, "affection", 2);
-    renderResult({ title: `${c.name} clinks your glass`, lines: [`"You read my mind." She drinks, watching you over the rim.`, `Libido +${T.partyDrinkLibido} · Romance +4 · Affection +2`], tone: "good", then: partyAfter });
+    const vLine = voiceFor(id, "party.drinkBring");
+    renderResult({ title: `${c.name} clinks your glass`, lines: [vLine || `"You read my mind." She drinks, watching you over the rim.`, `Libido +${T.partyDrinkLibido} · Romance +4 · Affection +2`], tone: "good", then: partyAfter });
   }
   function renderDanceModes(id) {
     renderHud(); clearScreen();
@@ -1412,9 +1567,11 @@
   }
   function partyDance(id, mode) {
     const c = D.CHARACTERS[id];
+    const vWin = voiceFor(id, `party.danceLine.${mode.id}`);
+    const vFail = voiceFor(id, "party.danceFailLine");
     if (!mode.risk) {
       adjustBar(id, "romance", mode.rom); adjustBar(id, "libido", mode.lib);
-      renderResult({ title: "On the floor", lines: [`${c.name} matches you, laughing, easy. No stakes, all fun.`, `Romance +${mode.rom}${mode.lib ? ` · Libido +${mode.lib}` : ""}`], tone: "good", then: partyAfter });
+      renderResult({ title: "On the floor", lines: [vWin || `${c.name} matches you, laughing, easy. No stakes, all fun.`, `Romance +${mode.rom}${mode.lib ? ` · Libido +${mode.lib}` : ""}`], tone: "good", then: partyAfter });
       return;
     }
     const roll = d20(), gauge = Math.floor(recept(id) / 6) + Math.floor(barVal(id, "libido") / 12);
@@ -1423,11 +1580,11 @@
       adjustBar(id, "romance", mode.rom); adjustBar(id, "libido", mode.lib); adjustBar(id, "attraction", 2);
       if (mode.id === "handsy") bumpHeat();
       renderResult({ title: mode.id === "handsy" ? "She pulls you closer" : "She's right there with you", roll: { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party buzz", total, dc: 13 },
-        lines: [mode.id === "handsy" ? `${c.name}'s hands find your collar. The room stops mattering.` : `${c.name} moves in close, breath warm, completely unbothered by who's watching.`, `Romance +${mode.rom} · Libido +${mode.lib}`], tone: "good", then: partyAfter });
+        lines: [vWin || (mode.id === "handsy" ? `${c.name}'s hands find your collar. The room stops mattering.` : `${c.name} moves in close, breath warm, completely unbothered by who's watching.`), `Romance +${mode.rom} · Libido +${mode.lib}`], tone: "good", then: partyAfter });
     } else {
       adjustBar(id, "romance", T.danceFail.romance); adjustBar(id, "affection", T.danceFail.affection);
       renderResult({ title: "She steps back", roll: { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party buzz", total, dc: 13 },
-        lines: [`${c.name} catches your hands and sets them back. "Easy. Not like that, not here."`, `Romance ${T.danceFail.romance} · Affection ${T.danceFail.affection}`], tone: "bad", then: partyAfter });
+        lines: [vFail || `${c.name} catches your hands and sets them back. "Easy. Not like that, not here."`, `Romance ${T.danceFail.romance} · Affection ${T.danceFail.affection}`], tone: "bad", then: partyAfter });
     }
   }
   function hookupScene(id, mode) {
@@ -1455,7 +1612,8 @@
     if (ok) {
       adjustBar(id, "romance", T.privateReward.romance); adjustBar(id, "libido", T.privateReward.libido); adjustBar(id, "attraction", T.privateReward.attractionEvent);
       bumpHeat();
-      renderResult({ title: "She's all the way in", roll: rollBox, lines: [subN(esc.line, c.name)], tone: "good", then: () => renderPartyProtection(id, sc), thenLabel: "…and then" });
+      const vLine = esc.label ? voiceFor(id, `party.privateEsc.${esc.label}`) : null;
+      renderResult({ title: "She's all the way in", roll: rollBox, lines: [subN(vLine || esc.line, c.name)], tone: "good", then: () => renderPartyProtection(id, sc), thenLabel: "…and then" });
     } else {
       adjustBar(id, "romance", T.privateFail.romance); adjustBar(id, "affection", T.privateFail.affection);
       state.party.guests = state.party.guests.filter((g) => g !== id);
@@ -1494,14 +1652,16 @@
   function renderFloorSex(id) {
     const c = D.CHARACTERS[id], FS = D.PARTY.floorSex;
     const sc = { win: FS.win, headOut: FS.headOut };
+    const vAsk = voiceFor(id, "party.floorAsk");
+    const vWin = voiceFor(id, "party.floorWin");
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `On the floor · ${c.name}`));
-    w.appendChild(el("p", "char-line", subN(FS.ask, c.name)));
+    w.appendChild(el("p", "char-line", subN(vAsk || FS.ask, c.name)));
     const o = el("div", "choices");
     o.appendChild(button("Yes — right here, right now", () => {
       adjustBar(id, "romance", T.privateReward.romance); adjustBar(id, "libido", T.privateReward.libido + 4); adjustBar(id, "attraction", T.privateReward.attractionEvent); bumpHeat(2);
-      renderResult({ title: "Nobody's looking anyway", lines: FS.win.map((l) => subN(l, c.name)), tone: "good", then: () => renderPartyProtection(id, sc, "floor"), thenLabel: "…and then" });
+      renderResult({ title: "Nobody's looking anyway", lines: (Array.isArray(vWin) ? vWin : FS.win).map((l) => subN(l, c.name)), tone: "good", then: () => renderPartyProtection(id, sc, "floor"), thenLabel: "…and then" });
     }, "choice move"));
     o.appendChild(button("Pull her somewhere with a door first", () => renderHookup(id, "room"), "choice"));
     o.appendChild(button("Not in front of everyone — back off", () => { adjustBar(id, "affection", 1); renderResult({ title: "Pulled back", lines: [`You laugh it off and find your clothes; ${c.name} does too, unbothered, already plotting. Affection +1.`], tone: "good", then: partyAfter }); }, "choice subtle"));
@@ -1509,10 +1669,11 @@
   }
   function renderBodyShot(id) {
     const c = D.CHARACTERS[id], B = D.PARTY.bodyShot;
+    const vAsk = voiceFor(id, "party.bodyShot.ask");
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `🍋 Body shots · ${c.name}`));
-    w.appendChild(el("p", "char-line", subN(B.ask, c.name)));
+    w.appendChild(el("p", "char-line", subN(vAsk || B.ask, c.name)));
     const o = el("div", "choices");
     o.appendChild(button("You take it off her", () => resolveBodyShot(id, "her"), "choice move"));
     o.appendChild(button("Let her take it off you", () => resolveBodyShot(id, "you"), "choice move"));
@@ -1524,19 +1685,24 @@
     const gauge = Math.floor(recept(id) / 7) + Math.floor(barVal(id, "libido") / 10);
     const total = roll + gauge + T.partyVibe, ok = roll !== 1 && (roll === 20 || total >= B.dc);
     const rollBox = { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "kitchen heat", total, dc: B.dc };
+    const vWho = voiceFor(id, who === "you" ? "party.bodyShot.whoYou" : "party.bodyShot.whoHer");
+    const vWin = voiceFor(id, "party.bodyShot.win");
+    const vLose = voiceFor(id, "party.bodyShot.lose");
     if (ok) {
       adjustBar(id, "romance", B.romance); adjustBar(id, "libido", B.libido); adjustBar(id, "attraction", B.attractionEvent);
       if (!state.milestones[id].kiss) state.milestones[id].kiss = true;
       bumpHeat();
-      renderResult({ title: "The kitchen loses it", roll: rollBox, lines: [subN(B.who[who], c.name), subN(B.win, c.name), `Romance +${B.romance} · Libido +${B.libido}`], tone: "good", then: partyAfter });
+      renderResult({ title: "The kitchen loses it", roll: rollBox, lines: [subN(vWho || B.who[who], c.name), subN(vWin || B.win, c.name), `Romance +${B.romance} · Libido +${B.libido}`], tone: "good", then: partyAfter });
     } else {
       adjustBar(id, "romance", 1); adjustBar(id, "affection", 1);
-      renderResult({ title: "A mess, the fun kind", roll: rollBox, lines: [subN(B.who[who], c.name), subN(B.lose, c.name), "Romance +1 · Affection +1"], tone: "neutral", then: partyAfter });
+      renderResult({ title: "A mess, the fun kind", roll: rollBox, lines: [subN(vWho || B.who[who], c.name), subN(vLose || B.lose, c.name), "Romance +1 · Affection +1"], tone: "neutral", then: partyAfter });
     }
   }
   function renderNpc(id) {
     const c = D.CHARACTERS[id], npc = one(D.PARTY.npcs);
-    const beat = one(D.PARTY.npcBeats).replace(/\{n\}/g, c.name).replace(/\{g\}/g, npc);
+    const vPool = voiceFor(id, "party.npcBeats");
+    const pool = Array.isArray(vPool) && vPool.length ? vPool : D.PARTY.npcBeats;
+    const beat = one(pool).replace(/\{n\}/g, c.name).replace(/\{g\}/g, npc);
     const F = T.npcFlirt, rc = recept(id);
     renderHud(); clearScreen();
     const w = el("div", "talk");
@@ -1580,7 +1746,10 @@
       const c = D.CHARACTERS[id];
       let tier = spicyOK ? partyTier(id) : "plain";
       if (tier !== "plain" && Math.random() < 0.4) tier = "plain"; // keep variety
-      const pool = tierPool(tier, D.PARTY.guestBeats, D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats);
+      const vKey = tier === "scorch" ? "scorchingGuestBeats" : tier === "spicy" ? "spicyGuestBeats" : "guestBeats";
+      const vPool = voiceFor(id, `party.${vKey}`);
+      const pool = Array.isArray(vPool) && vPool.length ? vPool
+                  : tierPool(tier, D.PARTY.guestBeats, D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats);
       return one(pool).replace(/\{n\}/g, c.name);
     });
   }
@@ -1617,7 +1786,11 @@
       const tier = spicyOK ? partyTier(who) : "plain";
       const others = narr.filter((l) => l.indexOf(c.name) !== 0);
       if (tier !== "plain" && Math.random() < 0.34) return roundGuestStrip(who, tier, others);
-      const beat = one(tierPool(tier, D.PARTY.guestBeats, D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats)).replace(/\{n\}/g, c.name);
+      const vKey = tier === "scorch" ? "scorchingGuestBeats" : tier === "spicy" ? "spicyGuestBeats" : "guestBeats";
+      const vPool = voiceFor(who, `party.${vKey}`);
+      const pool = Array.isArray(vPool) && vPool.length ? vPool
+                  : tierPool(tier, D.PARTY.guestBeats, D.PARTY.spicyGuestBeats, D.PARTY.scorchingGuestBeats);
+      const beat = one(pool).replace(/\{n\}/g, c.name);
       const big = tier === "scorch";
       gameShell(`🎲 Truth or Dare · round ${pg.round}/${gameLen()}`, others, `${beat}${tier !== "plain" ? " She catches your eye doing it." : ""}  ·  What do you do?`, [
         ["Cheer her on, loudest in the room", () => { adjustBar(who, "romance", big ? 7 : tier === "spicy" ? 5 : 3); adjustBar(who, "libido", big ? 7 : tier === "spicy" ? 4 : 1); afterGameRound(`You're the loudest one clapping. ${c.name} plays the whole bit straight to you and makes very sure you know it. Romance +${big ? 7 : tier === "spicy" ? 5 : 3}${tier !== "plain" ? ` · Libido +${big ? 7 : 4}` : ""}.`); }],
