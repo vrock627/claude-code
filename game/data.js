@@ -235,13 +235,17 @@
       name: "Krystalle", emoji: "💍", blurb: "Married. Romantic, spontaneous, witty. Reads people in a glance and forgets to read herself.",
       likedStat: "strength", likedStyle: "smooth", dislikedStyle: "brash", favoriteGift: "perfume",
       schedule: { Morning: "cafe", Afternoon: "park", Night: "restaurant" },
-      hint: "Married, and she means it — mostly. Realness, banter, confidence without the strut. Slowest burn in the game; the moment exists, but you have to earn it.",
+      hint: "Married, and she means it — mostly. Plays hard to get, likes to tease. Reads as a friend first; the rest has to be earned, every step.",
       attractProfile: { strength: 0.4, style: 0.3, charisma: 0.2, intelligence: 0.1 },
       barWeights: { affection: 0.45, romance: 0.3, attraction: 0.2, libido: 0.05 },
       libidoRange: [4, 22], decay: { affection: 1, romance: 5 },
+      libidoGainMul: 0.35,
       traitAffinity: { sincere: 3, generous: 2, classy: 2, playful: 2, adventurous: 1, independent: 0 },
       gates: { homeRomance: 78, intimacyComposite: 82, partyPrivateInterest: 78 },
       marriage: { active: true, anxietyAt: 50 },
+      dateFlow: "hub",
+      hasFinishWhere: true,
+      stageGates: { flirting: 30 },
       opens: {
         cold: ["Krystalle twists her ring on her finger without thinking. \"Hi. Hi — sorry, I'm somewhere else today.\"", "Krystalle, half a step back: \"You're sweet to come over. I'm a little spoken-for, you know that, right?\""],
         neutral: ["Krystalle, brightening: \"Oh — hi. Okay. Distract me, I dare you.\"", "Krystalle: \"You always show up when my brain's loud. That's a talent.\""],
@@ -481,6 +485,18 @@
       q: "Right at the edge —",
       pull: { label: "Pull out", fx: { rom: 2, aff: 3 }, line: "You pull back at the last second, jaw tight, and finish against the curve of her hip with her hand fisted in the sheet and her forehead pressed to your temple, both of you breathing like you ran somewhere. \"…good call,\" she manages, eventually, a little wrecked, a little laughing. Neither of you moves for a while." },
       inside: { label: "Stay. Finish inside.", fx: { rom: 6, lib: 4 }, line: "Neither of you stops, or wants to, and you feel her decide that at the same moment you do — her legs locking you in, the unspoken thing very loud in the quiet right after. She keeps you there a long minute, heartbeat slamming against yours, not saying the obvious. Neither do you. Both of you are thinking it." },
+      // After Pull Out: optional follow-up beat. Only fires for characters
+      // whose entry sets `hasFinishWhere: true`. "ask" lets her pick.
+      where: {
+        q: "She breathes against your shoulder — \"…where?\" Half a question, half permission.",
+        opts: [
+          { id: "ask",     label: "Ask her — \"Where do you want it?\"", fx: { aff: 3, rom: 2 } },
+          { id: "stomach", label: "On her stomach",                       fx: { rom: 3, lib: 3 } },
+          { id: "chest",   label: "On her chest",                         fx: { rom: 4, lib: 4 } },
+          { id: "face",    label: "On her face",                          fx: { rom: 1, lib: 5, atr: 2 } },
+          { id: "mouth",   label: "In her mouth",                         fx: { rom: 2, lib: 6, atr: 2 } },
+        ],
+      },
     },
     // Protection beat for party hookups (home has its own HOME.sex).
     party: {
@@ -920,12 +936,70 @@
     stripDare: { romance: 6, libido: 7 }, stripFail: { romance: -4, affection: -3 },
     npcFlirt: { stayCool: { romance: 5, attractionEvent: 3 }, cutIn: { romance: 8, libido: 4 }, sulk: { romance: -6, affection: -4 }, letHer: { affection: 4, romance: -2 } },
     partyHookup: { romance: 16, libido: 14, attractionEvent: 5 },
+    // Conversation hub (dateFlow === "hub"): per-date action budget, DR
+    // step (DC bump per repeat in same category), reward decay step,
+    // and the cheating-DC bumps that escalate after the barrier breaks.
+    hubActionsMax: 6,
+    hubDrDc: 2, hubDrRewardStep: 0.3,
+    cheatBaseBump: 3,           // affair stage baseline DC bump on Move
+    cheatPerSexBump: 1.5,       // +per past sex, capped
+    cheatPerSexCap: 4,          // cap on the per-past-sex multiplier
+  };
+
+  // Krystalle conversation-hub categories. Each category lists actions;
+  // each action carries trait/mag for the resolver. Voice content lives
+  // on krystalle.js per category+action label. Pools randomize per render.
+  const HUB = {
+    categories: ["compliment", "question", "day", "move", "end"],
+    label: { compliment: "Compliment her", question: "Ask a question", day: "Talk about your day", move: "Make a move", end: "End the conversation" },
+    emoji: { compliment: "💬", question: "❓", day: "🗣️", move: "💋", end: "👋" },
+    actions: {
+      compliment: [
+        { id: "smile",     label: "Her smile",                   trait: "sincere", mag: 2, bar: "affection", baseFx: { rom: 2, aff: 3 } },
+        { id: "outfit",    label: "What she's wearing",          trait: "classy",  mag: 2, bar: "attraction", baseFx: { rom: 2, aff: 1, atr: 2 } },
+        { id: "specific",  label: "Something specific she said", trait: "sincere", mag: 3, bar: "affection", baseFx: { rom: 3, aff: 4 } },
+        { id: "carry",     label: "How she carries herself",     trait: "classy",  mag: 2, bar: "attraction", baseFx: { rom: 2, aff: 2, atr: 2 } },
+        { id: "laugh",     label: "Her laugh",                   trait: "playful", mag: 2, bar: "affection", baseFx: { rom: 3, aff: 3 } },
+        { id: "tease",     label: "Tease her back",              trait: "playful", mag: 3, bar: "romance", baseFx: { rom: 4, aff: 1 } },
+      ],
+      question: [
+        { id: "childhood", label: "Where she grew up",           trait: "sincere", mag: 2, bar: "affection", baseFx: { rom: 1, aff: 4 } },
+        { id: "lola",      label: "About her lola",              trait: "sincere", mag: 3, bar: "affection", baseFx: { rom: 1, aff: 5 } },
+        { id: "ifNot",     label: "What she'd do if not this",   trait: "sincere", mag: 2, bar: "romance", baseFx: { rom: 3, aff: 2 } },
+        { id: "secret",    label: "Something nobody asks her",   trait: "sincere", mag: 3, bar: "romance", baseFx: { rom: 4, aff: 3 } },
+        { id: "scared",    label: "What scared her this week",   trait: "sincere", mag: 2, bar: "affection", baseFx: { rom: 2, aff: 4 } },
+        { id: "wantMore",  label: "What she wants more of",      trait: "adventurous", mag: 2, bar: "romance", baseFx: { rom: 4, aff: 1 } },
+      ],
+      day: [
+        { id: "real",      label: "The real version",            trait: "sincere", mag: 2, bar: "affection", baseFx: { rom: 2, aff: 4 } },
+        { id: "funny",     label: "The funny version",           trait: "playful", mag: 2, bar: "affection", baseFx: { rom: 2, aff: 3 } },
+        { id: "vent",      label: "Vent about it",               trait: "sincere", mag: 2, bar: "affection", baseFx: { rom: 1, aff: 3 } },
+        { id: "brag",      label: "Brag about a win",            trait: "playful", mag: 1, bar: "attraction", baseFx: { rom: 1, aff: 1, atr: 2 } },
+        { id: "weird",     label: "Weird thing you saw",         trait: "playful", mag: 2, bar: "affection", baseFx: { rom: 2, aff: 2 } },
+        { id: "forHer",    label: "Something only she'd care about", trait: "sincere", mag: 3, bar: "affection", baseFx: { rom: 3, aff: 4 } },
+      ],
+      move: [
+        { id: "hand",      label: "Put your hand on hers",       trait: "sincere", mag: 2, bar: "romance", baseFx: { rom: 4, aff: 1 }, sexFlavor: false, gateStage: "friend" },
+        { id: "eyes",      label: "Catch her eye, hold it",      trait: "adventurous", mag: 2, bar: "romance", baseFx: { rom: 3, atr: 2 }, sexFlavor: false, gateStage: "friend" },
+        { id: "lean",      label: "Lean in close",               trait: "adventurous", mag: 3, bar: "romance", baseFx: { rom: 5, lib: 1 }, sexFlavor: false, gateStage: "flirting" },
+        { id: "hair",      label: "Brush her hair back",         trait: "sincere", mag: 2, bar: "romance", baseFx: { rom: 4, aff: 2 }, sexFlavor: false, gateStage: "flirting" },
+        { id: "kiss",      label: "Kiss her",                    trait: "adventurous", mag: 4, bar: "romance", baseFx: { rom: 8, lib: 2, atr: 2 }, sexFlavor: false, gateStage: "flirting", isKiss: true, dc: 14 },
+        { id: "press",     label: "\"Come here a second.\"",     trait: "adventurous", mag: 4, bar: "romance", baseFx: { rom: 6, lib: 2 }, sexFlavor: true, gateStage: "lover", dc: 16 },
+      ],
+      end: [
+        { id: "walkout",   label: "Pay the tab, walk her out",   trait: "generous", mag: 2, bar: "affection", baseFx: { rom: 2, aff: 3 } },
+        { id: "linger",    label: "Linger a minute, then go",    trait: "sincere", mag: 2, bar: "affection", baseFx: { rom: 2, aff: 4 } },
+        { id: "invite",    label: "Invite her somewhere next",   trait: "adventurous", mag: 2, bar: "romance", baseFx: { rom: 4, aff: 2 } },
+        { id: "regular",   label: "\"Same time next week?\"",    trait: "playful", mag: 2, bar: "affection", baseFx: { rom: 2, aff: 3 } },
+      ],
+    },
+    stageOrder: ["stranger", "friend", "flirting", "lover", "affair"],
   };
 
   window.GAMEDATA = {
     STATS, STAT_LABEL, STAT_SHORT, BARS, BAR_LABEL, BAR_SHORT, TRAITS,
     BG_CATEGORIES, WEEKDAYS, JOBS, HOUSES, CARS,
     SAYS, MOVE, LINES, ITEMS, SHOPS, LOCATIONS, PHASES,
-    CHARACTERS, BILL, DATE_SCENES, DATE_END, HOME, OVERLOOK, BEACH, INTIMACY, PARTY, STAGES, TUNING,
+    CHARACTERS, BILL, DATE_SCENES, DATE_END, HOME, OVERLOOK, BEACH, INTIMACY, PARTY, STAGES, TUNING, HUB,
   };
 })();

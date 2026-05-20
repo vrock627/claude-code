@@ -1,7 +1,7 @@
 (function () {
   const D = window.GAMEDATA;
   const T = D.TUNING;
-  const SAVE_KEY = "lifeSimSave_v4";
+  const SAVE_KEY = "lifeSimSave_v5";
   const CHAR_IDS = Object.keys(D.CHARACTERS);
   let state = null;
 
@@ -24,10 +24,11 @@
       day: 1, phaseIndex: 0, money: T.startMoney, bars,
       job: "freelance", owned: { house: "studio", car: "none" }, lastRollover: null,
       metCount: perChar(() => 0), learned: perChar(() => []),
-      milestones: perChar(() => ({ number: false, kiss: false, dates: 0 })),
+      milestones: perChar(() => ({ number: false, kiss: false, sex: false, secondSex: false, dates: 0 })),
       preg: perChar(() => null),
       inventory: {}, buffs: [], textedToday: perChar(() => false),
       party: null, partyRun: null, convo: null, date: null, pg: null,
+      flags: {},
     };
   }
 
@@ -46,6 +47,28 @@
     const g = D.CHARACTERS[id] && D.CHARACTERS[id].gates;
     return g && typeof g[key] === "number" ? g[key] : fallback;
   }
+  // Pool helper: voice slots can be string OR array of strings. If array,
+  // pick deterministically by `seed` so a re-render of the same screen
+  // doesn't reshuffle. If no seed, pick random.
+  function pick(v, seed) {
+    if (v == null) return null;
+    if (!Array.isArray(v)) return v;
+    if (!v.length) return null;
+    if (seed == null) return v[Math.floor(Math.random() * v.length)];
+    return v[hashStr(String(seed)) % v.length];
+  }
+  // Stage system (Krystalle, today; other chars may opt in later).
+  // Reads milestones + bars; pure function.
+  function krystStage() {
+    if (!state) return "stranger";
+    const m = state.milestones.krystalle || {}, b = state.bars.krystalle || {};
+    if (m.secondSex) return "affair";
+    if (m.sex) return "lover";
+    if (m.kiss || (b.romance || 0) >= 30) return "flirting";
+    if (state.flags && state.flags.krystalleMet) return "friend";
+    return "stranger";
+  }
+  function stageFor_(id) { return id === "krystalle" ? krystStage() : null; }
   const replaceN = (s, name) => String(s).replace(/\{n\}/g, name);
   const weekdayName = () => D.WEEKDAYS[((state.day - 1) % 7 + 7) % 7];
   const jobDef = () => D.JOBS[state.job] || D.JOBS.freelance;
@@ -142,6 +165,13 @@
   }
   function adjustBar(id, bar, delta) {
     if (!delta) return;
+    // Per-character libido throttle: keeps slow-burn characters slow even
+    // when many small bumps would otherwise pile up. Negative deltas pass
+    // through unchanged (decay still works at full rate).
+    if (bar === "libido" && delta > 0) {
+      const mul = (D.CHARACTERS[id] && D.CHARACTERS[id].libidoGainMul);
+      if (typeof mul === "number") delta = Math.max(1, Math.round(delta * mul));
+    }
     if (bar === "attraction") state.bars[id].attrEvent = clamp(state.bars[id].attrEvent + delta, 0, T.attractEventCap);
     else if (bar === "libido") state.bars[id].libidoTemp += delta;
     else state.bars[id][bar] = clamp(state.bars[id][bar] + delta, 0, T.barCap);
@@ -567,8 +597,57 @@
     const pg = state.preg[id];
     if (pg && !pg.talked && state.day - pg.sinceDay >= T.pregTalkAfterDays)
       return renderPregnancyTalk(id, !!party);
+    // First meeting: one-shot, per-character. Sets the {id}Met flag so
+    // subsequent conversations use the normal opens.
+    const c = D.CHARACTERS[id];
+    const metKey = id + "Met";
+    if (c.firstMeeting && !(state.flags && state.flags[metKey])) {
+      state.convo = { id, locId, beat: 0, momentum: 0, party: !!party, firstMeeting: true };
+      return renderFirstMeeting(id, locId, !!party);
+    }
     state.convo = { id, locId, beat: 0, momentum: 0, party: !!party };
     renderConvoBeat();
+  }
+  function renderFirstMeeting(id, locId, party) {
+    renderHud(); clearScreen();
+    const c = D.CHARACTERS[id], FM = c.firstMeeting;
+    const beatIdx = state.convo.beat;
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `${c.emoji} ${c.name} · first meeting`));
+    if (beatIdx === 0 && FM.intro) w.appendChild(el("p", "char-line", subN(pick(FM.intro, "fmIntro"), c.name)));
+    const beat = FM.beats[beatIdx];
+    if (!beat) return finishFirstMeeting(id, party);
+    w.appendChild(el("p", "talk-prompt", pick(beat.q, "fmQ" + beatIdx)));
+    const o = el("div", "choices");
+    beat.opts.forEach((opt, i) => o.appendChild(button(opt.text, () => {
+      const line = pick(opt.line, "fmLine" + beatIdx + i);
+      // Small bar nudges from the chosen trait (affection only — friend tier).
+      const baseAff = 4 + (opt.trait === "sincere" ? 2 : opt.trait === "playful" ? 1 : 0);
+      adjustBar(id, "affection", baseAff);
+      renderResult({
+        title: "First meeting",
+        lines: [subN(line, c.name), `Affection +${baseAff}`],
+        tone: "good",
+        then: () => { state.convo.beat += 1; renderFirstMeeting(id, locId, party); },
+        thenLabel: state.convo.beat + 1 >= FM.beats.length ? "After…" : "Continue",
+      });
+    }, "choice")));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function finishFirstMeeting(id, party) {
+    const flags = state.flags || (state.flags = {});
+    flags[id + "Met"] = true;
+    // Number milestone is set on first meeting so she shows up in contacts.
+    state.milestones[id].number = true;
+    const c = D.CHARACTERS[id], locId = state.convo.locId;
+    state.convo = null;
+    renderResult({
+      title: `${c.name} — exchanged numbers`,
+      lines: [`${c.name} types her number into your phone before she goes. "Don't be a stranger."`, "(She's in your contacts now.)"],
+      tone: "good",
+      then: () => { party ? partyAfter() : renderLocation(locId); },
+      thenLabel: "Back",
+    });
   }
   function renderPregnancyTalk(id, party) {
     const c = D.CHARACTERS[id], P = D.INTIMACY.pregnancy;
@@ -594,7 +673,10 @@
     const cv = state.convo, c = D.CHARACTERS[cv.id], mood = moodOf(cv.id);
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `${c.emoji} ${c.name}`));
-    w.appendChild(el("p", "char-line", one(c.opens[mood])));
+    // Stage-keyed opens (Krystalle today; others fall back to legacy shape).
+    const stage = cv.id === "krystalle" ? krystStage() : null;
+    const openPool = stage ? (stageOpens(cv.id, stage) || c.opens[mood]) : c.opens[mood];
+    w.appendChild(el("p", "char-line", one(openPool)));
     w.appendChild(el("p", "talk-prompt", "You say —"));
     const o = el("div", "choices");
     for (const s of pickN(D.SAYS, 3)) o.appendChild(button(s.say, () => resolveBeat(s), "choice say"));
@@ -749,29 +831,188 @@
     renderDateBeat();
   }
   function renderDateBeat() {
+    const dt = state.date, c = D.CHARACTERS[dt.id];
+    // Hub-mode date flow (Krystalle, today). Branches before anything else.
+    if (c.dateFlow === "hub") return renderConversationHub();
     renderHud(); clearScreen();
-    const dt = state.date, c = D.CHARACTERS[dt.id], scene = D.DATE_SCENES[dt.venue];
+    const scene = D.DATE_SCENES[dt.venue];
     // Anxiety beat — fires once mid-date when she crosses the threshold.
     if (maybeAnxietyBeat(dt.id, "date")) return;
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `🍷 ${D.LOCATIONS[dt.venue].name} · with ${c.name}`));
     if (dt.beat === 0) {
-      const vIntro = voiceFor(dt.id, `venues.${dt.venue}.intro`);
+      const vIntro = pick(voiceFor(dt.id, `venues.${dt.venue}.intro`), `vIntro.${dt.venue}`);
       w.appendChild(el("p", "char-line", vIntro || scene.intro));
     }
     const b = scene.beats[dt.beat];
-    const vQ = voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.q`);
+    const vQ = pick(voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.q`), `vQ.${dt.venue}.${dt.beat}`);
     w.appendChild(el("p", "talk-prompt", vQ || b.q));
     const o = el("div", "choices");
     b.opts.forEach((opt, i) => o.appendChild(button(opt.text, () => {
       dt.picks.push(opt);
-      const vSaid = voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.opts.${i}.said`);
-      const vLine = voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.opts.${i}.line`);
+      const vSaid = pick(voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.opts.${i}.said`), `vSaid.${dt.venue}.${dt.beat}.${i}.${Math.random()}`);
+      const vLine = pick(voiceFor(dt.id, `venues.${dt.venue}.beats.${dt.beat}.opts.${i}.line`), `vLine.${dt.venue}.${dt.beat}.${i}.${Math.random()}`);
       const advance = () => { dt.beat += 1; dt.beat >= scene.beats.length ? afterVenueBeats() : renderDateBeat(); };
       if (vSaid || vLine) return renderVoiceInterstitial(c.name, vSaid, vLine, advance);
       advance();
     }, "choice")));
     w.appendChild(o); screen().appendChild(w);
+  }
+
+  // ----- Conversation hub (dateFlow === "hub") -----
+  // Player picks a category → action → result → loops back. Per-date
+  // action budget; DR per repeat category; sex-attempt DC escalates with
+  // cheating count. Voice content lives at K.voice.hub.{category}...
+  function ensureHubState() {
+    const dt = state.date;
+    if (!dt.hub) dt.hub = { actions: 0, counts: { compliment: 0, question: 0, day: 0, move: 0 }, picks: [] };
+    return dt.hub;
+  }
+  function renderConversationHub() {
+    const dt = state.date, c = D.CHARACTERS[dt.id];
+    // Anxiety beat: hub respects the same threshold check.
+    if (maybeAnxietyBeat(dt.id, "date")) return;
+    const hub = ensureHubState();
+    if (hub.actions >= (T.hubActionsMax || 6)) return endHubDate();
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `${c.emoji} ${c.name} · ${D.LOCATIONS[dt.venue].name}`));
+    if (hub.actions === 0) {
+      const vIntro = pick(voiceFor(dt.id, `hub.venues.${dt.venue}.intro`), `hubIntro.${dt.venue}`);
+      if (vIntro) w.appendChild(el("p", "char-line", subN(vIntro, c.name)));
+    }
+    const stage = krystStage();
+    // Stage-keyed open line — replaces the per-mood open with stage+mood.
+    const openPool = stageOpens(dt.id, stage);
+    if (openPool) w.appendChild(el("p", "char-line", subN(pick(openPool, `hubOpen.${stage}.${hub.actions}`), c.name)));
+    w.appendChild(el("p", "talk-prompt", hub.actions === 0 ? "Where do you want to take this?" : "What now?"));
+    const o = el("div", "choices");
+    for (const cat of D.HUB.categories) {
+      const lbl = `${D.HUB.emoji[cat]} ${D.HUB.label[cat]}`;
+      const n = hub.counts[cat] || 0;
+      const tag = (n > 0 && cat !== "end") ? ` (×${n})` : "";
+      o.appendChild(button(lbl + tag, () => renderHubCategory(cat), cat === "end" ? "choice subtle" : "choice"));
+    }
+    // Budget readout, subtle.
+    w.appendChild(o);
+    const meta = el("p", "char-line dim", `Actions ${hub.actions}/${T.hubActionsMax || 6} · she's reading ${stage}`);
+    w.appendChild(meta);
+    screen().appendChild(w);
+  }
+  function stageOpens(id, stage) {
+    const c = D.CHARACTERS[id]; if (!c.opens) return null;
+    // Stage-keyed shape: opens[stage][mood]. Falls back to legacy
+    // opens[mood] for characters that haven't opted in.
+    const mood = moodOf(id);
+    const stageBlock = c.opens[stage];
+    if (stageBlock && typeof stageBlock === "object" && !Array.isArray(stageBlock)) {
+      return stageBlock[mood] || stageBlock.neutral || stageBlock.warm || null;
+    }
+    return c.opens[mood] || null;
+  }
+  function renderHubCategory(category) {
+    const dt = state.date, c = D.CHARACTERS[dt.id];
+    if (category === "end") return endHubDate();
+    const hub = ensureHubState();
+    const stage = krystStage();
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `${c.emoji} ${c.name} · ${D.HUB.label[category]}`));
+    // Optional pre-action narration for the category — sets mood.
+    const preKey = category === "move" && (stage === "lover" || stage === "affair") ? `hub.cheatPre.${stage}` : `hub.pre.${category}`;
+    const pre = pick(voiceFor(dt.id, preKey), `hubPre.${category}.${stage}.${hub.actions}`);
+    if (pre) w.appendChild(el("p", "char-line", subN(pre, c.name)));
+    w.appendChild(el("p", "talk-prompt", "Pick one —"));
+    const o = el("div", "choices");
+    for (const action of D.HUB.actions[category]) {
+      const gateStage = action.gateStage;
+      const locked = gateStage && D.HUB.stageOrder.indexOf(stage) < D.HUB.stageOrder.indexOf(gateStage);
+      const lbl = action.label + (locked ? ` — not yet (need ${gateStage})` : "");
+      if (locked) o.appendChild(button(lbl, null, "choice", true));
+      else o.appendChild(button(action.label, () => resolveHubAction(category, action), action.isKiss || action.sexFlavor ? "choice move" : "choice"));
+    }
+    o.appendChild(button("Back to the table", renderConversationHub, "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function resolveHubAction(category, action) {
+    const dt = state.date, id = dt.id, c = D.CHARACTERS[id];
+    const hub = ensureHubState();
+    const stage = krystStage();
+    const n = hub.counts[category] || 0;
+    const drDc = n * (T.hubDrDc || 2);
+    const drRew = Math.max(0, 1 - (T.hubDrRewardStep || 0.3) * n);
+    // Cheating-DC escalation: applies only to Move at lover/affair stage,
+    // and only when the action is sex-flavored or a kiss-leading move.
+    let cheatBump = 0;
+    if (category === "move" && (stage === "affair")) cheatBump += (T.cheatBaseBump || 3);
+    if (category === "move" && (stage === "lover" || stage === "affair")) {
+      const sexCount = Math.min((state.flags.krystalleSexCount || 0), (T.cheatPerSexCap || 4));
+      cheatBump += sexCount * (T.cheatPerSexBump || 1.5);
+    }
+    const baseDc = action.dc || (T.baseDC + Math.round(composite(id) * T.dcPerInterest));
+    const dc = Math.round(baseDc + drDc + cheatBump);
+    // Resolve: traitAffinity * mag + d20 + likedStat read.
+    const roll = d20(), sv = effStat(c.likedStat);
+    const traitV = (c.traitAffinity[action.trait] || 0) * (action.mag || 1);
+    const total = roll + sv + traitV;
+    const ok = roll !== 1 && (roll === 20 || total >= dc);
+    const rewardMul = ok ? drRew : 0.4;       // fail still bumps a touch
+    // Apply fx scaled by reward multiplier.
+    const fx = action.baseFx || {};
+    if (fx.rom) adjustBar(id, "romance",    Math.round((ok ? fx.rom : -Math.abs(fx.rom) * 0.3) * (ok ? rewardMul : 1)));
+    if (fx.aff) adjustBar(id, "affection",  Math.round((ok ? fx.aff : -Math.abs(fx.aff) * 0.3) * (ok ? rewardMul : 1)));
+    if (fx.lib) adjustBar(id, "libido",     ok ? Math.round(fx.lib * rewardMul) : 0);
+    if (fx.atr) adjustBar(id, "attraction", ok ? Math.round(fx.atr * rewardMul) : 0);
+    // Kiss milestone.
+    if (ok && action.isKiss && !state.milestones[id].kiss) {
+      state.milestones[id].kiss = true; adjustBar(id, "attraction", 4);
+    }
+    hub.counts[category] = n + 1;
+    hub.actions += 1;
+    hub.picks.push({ category, id: action.id, ok });
+    // Voice lookup priority for the narration:
+    //   1) DR pool if n >= 2 ("you're repeating yourself")
+    //   2) cheating-affair pool if stage==="affair" && category==="move"
+    //   3) standard hub action pool by id
+    const repeat = n >= 2;
+    const seedBase = `hub.${category}.${action.id}.${state.day}.${hub.actions}`;
+    let said = null, line = null;
+    if (repeat) {
+      said = pick(voiceFor(id, `hub.repeat.${category}.said`), seedBase + ".saidR");
+      line = pick(voiceFor(id, `hub.repeat.${category}.line`), seedBase + ".lineR");
+    }
+    if (!line && stage === "affair" && category === "move") {
+      said = said || pick(voiceFor(id, `hub.cheatMove.${action.id}.said`), seedBase + ".saidA");
+      line = pick(voiceFor(id, `hub.cheatMove.${action.id}.line`), seedBase + ".lineA");
+    }
+    if (!line) {
+      said = said || pick(voiceFor(id, `hub.${category}.${action.id}.said`), seedBase + ".said");
+      line = pick(voiceFor(id, `hub.${category}.${action.id}.line`), seedBase + ".line");
+    }
+    const title = ok ? (action.isKiss ? "She meets you there" : "She's right there with you")
+                     : "Misread";
+    const lines = [];
+    if (said) lines.push(subN(said, c.name));
+    if (line) lines.push(subN(line, c.name));
+    else lines.push(ok ? `${c.name} leans in. That landed.` : `${c.name} eases back, gentle but firm. "…hey. Slow down.\"`);
+    if (drDc) lines.push(`(Repeat ×${n + 1} · DC +${drDc}${cheatBump ? ` · cheat +${Math.round(cheatBump)}` : ""} → DC ${dc})`);
+    else if (cheatBump) lines.push(`(DC ${dc} — she's wrestling with this one.)`);
+    lines.push(`Rolled ${roll} + ${sv + traitV} = ${total} vs DC ${dc}.`);
+    renderResult({
+      title,
+      lines,
+      tone: ok ? "good" : "bad",
+      then: renderConversationHub,
+      thenLabel: "Back to the table",
+    });
+  }
+  function endHubDate() {
+    const dt = state.date, c = D.CHARACTERS[dt.id];
+    const scene = D.DATE_SCENES[dt.venue];
+    // Run the bill if the venue has one (re-use shared flow).
+    if (scene && scene.bill) return renderBill();
+    // Otherwise jump to the end-of-night decision.
+    return offerContinue(0.4);
   }
   // Light interstitial between a player choice and the next beat — shows
   // her response (said) and the narrator's read (line) on one Continue.
@@ -1409,12 +1650,15 @@
       w.appendChild(el("p", "talk-prompt", F.q));
       o.appendChild(button(F.pull.label, () => {
         intimFx(im.id, F.pull.fx);
-        const vPull = voiceFor(im.id, "intimacy.pull");
-        im.log.push(vPull || F.pull.line); im.finishDone = true; renderIntimacyBeat();
+        const vPull = pick(voiceFor(im.id, "intimacy.pull"), `intim.pull.${im.id}.${state.day}`);
+        im.log.push(vPull || F.pull.line); im.finishDone = true;
+        // Optional follow-up: "where?" sub-beat for characters who opt in.
+        if (c.hasFinishWhere && F.where) return renderFinishWhere();
+        renderIntimacyBeat();
       }, "choice"));
       o.appendChild(button(F.inside.label, () => {
         intimFx(im.id, F.inside.fx);
-        const vIn = voiceFor(im.id, "intimacy.inside");
+        const vIn = pick(voiceFor(im.id, "intimacy.inside"), `intim.inside.${im.id}.${state.day}`);
         im.log.push(vIn || F.inside.line); im.finishDone = true;
         if (!state.preg[im.id] && Math.random() < T.pregChanceRaw)
           state.preg[im.id] = { sinceDay: state.day, talked: false, status: null };
@@ -1441,8 +1685,56 @@
     }
     w.appendChild(o); screen().appendChild(w);
   }
+  function renderFinishWhere() {
+    const im = state.intim, c = D.CHARACTERS[im.id], W = D.INTIMACY.finish.where;
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `The rest of the night · ${c.name}`));
+    for (const l of im.log.slice(-2)) w.appendChild(el("p", "char-line", subN(l, c.name)));
+    const vQ = pick(voiceFor(im.id, "intimacy.finishWhere.q"), `fwQ.${im.id}.${state.day}`);
+    w.appendChild(el("p", "talk-prompt", vQ || W.q));
+    const o = el("div", "choices");
+    for (const opt of W.opts) {
+      o.appendChild(button(opt.label, () => resolveFinishWhere(opt), opt.id === "ask" ? "choice subtle" : "choice"));
+    }
+    w.appendChild(o); screen().appendChild(w);
+  }
+  function resolveFinishWhere(opt) {
+    const im = state.intim, c = D.CHARACTERS[im.id];
+    // "Ask her" → she picks one of the others based on stage+mood. For
+    // Krystalle: lover prefers stomach/chest; affair prefers chest/face/mouth.
+    let chosen = opt;
+    if (opt.id === "ask") {
+      const stage = im.id === "krystalle" ? krystStage() : null;
+      const pool = stage === "affair" ? ["chest", "face", "mouth"]
+                 : stage === "lover"  ? ["stomach", "chest"]
+                 : ["stomach"];
+      const choice = pool[Math.floor(Math.random() * pool.length)];
+      chosen = D.INTIMACY.finish.where.opts.find((o) => o.id === choice) || opt;
+      const askFx = opt.fx || {};
+      if (askFx.aff) adjustBar(im.id, "affection", askFx.aff);
+      if (askFx.rom) adjustBar(im.id, "romance", askFx.rom);
+      const vAsk = pick(voiceFor(im.id, "intimacy.finishWhere.ask"), `fwAsk.${im.id}.${state.day}`);
+      if (vAsk) im.log.push(vAsk);
+    }
+    const fx = chosen.fx || {};
+    if (fx.rom) adjustBar(im.id, "romance", fx.rom);
+    if (fx.lib) adjustBar(im.id, "libido", fx.lib);
+    if (fx.atr) adjustBar(im.id, "attraction", fx.atr);
+    if (fx.aff) adjustBar(im.id, "affection", fx.aff);
+    const vLine = pick(voiceFor(im.id, `intimacy.finishWhere.${chosen.id}`), `fwLine.${im.id}.${chosen.id}.${state.day}`);
+    if (vLine) im.log.push(vLine);
+    else im.log.push(`You finish on her ${chosen.id === "stomach" ? "stomach" : chosen.id === "chest" ? "chest" : chosen.id === "face" ? "face" : "lips"}. She breathes through it, eyes on yours.`);
+    renderIntimacyBeat();
+  }
   function finishIntimacy() {
     const im = state.intim, c = D.CHARACTERS[im.id], after = im.after, tone = im.closeTone;
+    // Sex-milestone bookkeeping: first time → sex true; second time → secondSex.
+    const m = state.milestones[im.id];
+    if (!m.sex) { m.sex = true; }
+    else if (!m.secondSex) { m.secondSex = true; }
+    state.flags = state.flags || {};
+    state.flags[im.id + "SexCount"] = (state.flags[im.id + "SexCount"] || 0) + 1;
     state.intim = null;
     renderResult({ title: "…and the rest of the night", lines: im.log.slice(-3).map((l) => subN(l, c.name)), tone, then: after || advancePhase, thenLabel: "…after" });
   }
@@ -2015,7 +2307,12 @@
       state.bars = {}; for (const id of CHAR_IDS) state.bars[id] = Object.assign(freshBars(id), p.bars && p.bars[id]);
       state.metCount = Object.assign(perChar(() => 0), p.metCount);
       state.learned = Object.assign(perChar(() => []), p.learned);
-      state.milestones = Object.assign(perChar(() => ({ number: false, kiss: false, dates: 0 })), p.milestones || {});
+      state.milestones = Object.assign(perChar(() => ({ number: false, kiss: false, sex: false, secondSex: false, dates: 0 })), p.milestones || {});
+      // Per-char milestones may be partial from older saves — top up missing keys.
+      for (const id of CHAR_IDS) {
+        state.milestones[id] = Object.assign({ number: false, kiss: false, sex: false, secondSex: false, dates: 0 }, state.milestones[id] || {});
+      }
+      state.flags = (p.flags && typeof p.flags === "object") ? p.flags : {};
       state.preg = Object.assign(perChar(() => null), p.preg || {});
       state.inventory = p.inventory || {};
       state.buffs = Array.isArray(p.buffs) ? p.buffs : [];

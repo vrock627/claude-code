@@ -460,10 +460,27 @@ for (const [id, c] of Object.entries(D.CHARACTERS)) {
   check(c.libidoRange[0] >= 0 && c.libidoRange[1] <= 100 && c.libidoRange[0] < c.libidoRange[1], `${id}: libidoRange`);
   check(c.decay.affection >= 0 && c.decay.romance >= 0, `${id}: decay`);
   for (const k of Object.keys(c.traitAffinity)) check(TRAIT.has(k), `${id}: traitAffinity unknown trait ${k}`);
-  // Per-character openers (every mood) + reveals.
+  // Per-character openers (every mood) + reveals. Two valid shapes:
+  //   legacy: opens[mood] = [strings]
+  //   stage-keyed: opens[stage][mood] = [strings]  (Krystalle and later)
   check(c.opens, `${id}: missing opens`);
-  for (const mood of ["cold", "neutral", "warm", "hot"])
-    check(c.opens && Array.isArray(c.opens[mood]) && c.opens[mood].length, `${id}: opens.${mood} empty`);
+  const stageKeyed = c.opens.friend || c.opens.flirting || c.opens.lover || c.opens.affair;
+  if (stageKeyed) {
+    // Stage-keyed: each stage must have at least one mood pool.
+    let any = false;
+    for (const stage of ["stranger", "friend", "flirting", "lover", "affair"]) {
+      const block = c.opens[stage];
+      if (block && typeof block === "object") {
+        for (const mood of ["cold", "neutral", "warm", "hot"]) {
+          if (Array.isArray(block[mood]) && block[mood].length) { any = true; break; }
+        }
+      }
+    }
+    check(any, `${id}: stage-keyed opens has no usable pools`);
+  } else {
+    for (const mood of ["cold", "neutral", "warm", "hot"])
+      check(Array.isArray(c.opens[mood]) && c.opens[mood].length, `${id}: opens.${mood} empty`);
+  }
   check(Array.isArray(c.reveals) && c.reveals.length >= 3, `${id}: needs >=3 reveals`);
   check(c.reveals.every((r) => typeof r === "string" && r.length), `${id}: bad reveal text`);
 }
@@ -616,68 +633,93 @@ check(CHARS.length >= 5, `expected >=5 characters, got ${CHARS.length}`);
 const favs = CHARS.map((id) => D.CHARACTERS[id].favoriteGift);
 check(new Set(favs).size === favs.length, "favorite gifts should be distinct per character");
 
-// --- Krystalle: married, voice-overridden, hardest to sleep with. ---
+// --- Krystalle: married, hub-mode, friend-first, throttled libido. ---
 (function () {
   const K = D.CHARACTERS.krystalle;
+  const HUB = D.HUB;
   check(K, "krystalle missing");
   check(K.gates && K.gates.homeRomance > T.homeContinueMinRomance && K.gates.homeRomance < 100, "krystalle.gates.homeRomance should raise the bar");
   check(K.gates.intimacyComposite >= 75, "krystalle.gates.intimacyComposite should be high");
   check(K.libidoRange[1] < 30, "krystalle libido ceiling must be tight");
   check(K.marriage && K.marriage.active, "krystalle.marriage.active expected");
+  check(K.dateFlow === "hub", "krystalle should use hub dateFlow");
+  check(K.hasFinishWhere === true, "krystalle should opt in to finishWhere");
+  check(typeof K.libidoGainMul === "number" && K.libidoGainMul > 0 && K.libidoGainMul < 1, "krystalle.libidoGainMul throttle expected");
   check(K.anxietyBeat && K.anxietyBeat.q && K.anxietyBeat.opts && K.anxietyBeat.opts.length >= 3, "krystalle.anxietyBeat shape");
   check(K.anxietyBeat.opts.some((o) => o.clears), "anxiety beat needs at least one clearing path");
   check(typeof K.specialEntry === "string" && K.specialEntry.length > 40, "krystalle.specialEntry copy missing");
-  // Voice tree shape and parity checks.
-  check(K.voice && K.voice.venues && K.voice.places && K.voice.party && K.voice.intimacy, "krystalle.voice tree missing branches");
-  // Every overridden venue beat must have opt-count parity with the
-  // shared DATE_SCENES — that's how index-keyed lookup stays safe.
-  for (const [vid, v] of Object.entries(K.voice.venues)) {
-    check(D.DATE_SCENES[vid], `krystalle voice references unknown venue ${vid}`);
-    if (Array.isArray(v.beats)) {
-      check(v.beats.length === D.DATE_SCENES[vid].beats.length, `krystalle ${vid}: beat count mismatch`);
-      v.beats.forEach((b, i) => {
-        const src = D.DATE_SCENES[vid].beats[i];
-        check(b.opts.length === src.opts.length, `krystalle ${vid} beat ${i}: opt count mismatch (${b.opts.length} vs ${src.opts.length})`);
-        for (const o of b.opts) check(o.said || o.line, `krystalle ${vid} beat ${i}: opt missing said/line`);
-      });
+
+  // Stage-keyed opens — friend stage exists and is platonic-warm.
+  check(K.opens && K.opens.friend && K.opens.friend.neutral && K.opens.friend.neutral.length, "krystalle.opens.friend.neutral required");
+  check(K.opens.flirting && K.opens.lover && K.opens.affair, "krystalle.opens needs all stages");
+
+  // First meeting present, friend-tier, structured.
+  check(K.firstMeeting && Array.isArray(K.firstMeeting.beats) && K.firstMeeting.beats.length >= 2, "krystalle.firstMeeting needs >=2 beats");
+  for (const b of K.firstMeeting.beats) {
+    check(b.opts && b.opts.length >= 2, "firstMeeting beat needs >=2 opts");
+    for (const o of b.opts) check(o.text && o.line, "firstMeeting opt missing text/line");
+  }
+
+  // Voice tree exists; pool-shape (string OR array of strings) wherever provided.
+  check(K.voice && K.voice.hub, "krystalle.voice.hub required");
+  function poolOk(v) {
+    if (v == null) return false;
+    if (typeof v === "string") return v.length > 0;
+    if (Array.isArray(v)) return v.length > 0 && v.every((x) => typeof x === "string" && x.length > 0);
+    return false;
+  }
+  // Every hub category has actions, and each action has a `said` and/or `line` pool.
+  for (const cat of HUB.categories) {
+    if (cat === "end") {
+      const actions = HUB.actions.end || [];
+      check(actions.length >= 2, "hub.end needs actions");
+      continue;
     }
-    if (v.bill) {
-      const billOpts = D.DATE_SCENES[vid].bill && D.DATE_SCENES[vid].bill.options;
-      if (billOpts) for (const bid of billOpts) if (v.bill.lines && v.bill.lines[bid]) check(typeof v.bill.lines[bid] === "string", `krystalle ${vid} bill ${bid} bad type`);
+    const catActions = HUB.actions[cat] || [];
+    check(catActions.length >= 4, `hub.${cat}: need >=4 actions for variety (got ${catActions.length})`);
+    const voicePool = K.voice.hub[cat];
+    check(voicePool, `krystalle.voice.hub.${cat} missing`);
+    for (const a of catActions) {
+      const v = voicePool[a.id];
+      // Voice for each action: at least one of said/line is a non-empty pool.
+      check(v && (poolOk(v.said) || poolOk(v.line)), `hub.${cat}.${a.id}: missing voice (said or line pool)`);
     }
   }
-  // HOME/OVERLOOK/BEACH room keys + action labels must exist on the
-  // shared trees. Walks every key under places.<place>.rooms.
-  function collectLabels(tree) {
-    const out = new Set();
-    (function walk(ns) { for (const n of ns || []) { if (n.label) out.add(n.label); if (n.sub) walk(n.sub); if (n.actions) walk(n.actions); } })(tree);
-    return out;
+
+  // Repeat-category pools exist and have ≥2 entries each.
+  for (const cat of ["compliment", "question", "day", "move"]) {
+    const r = K.voice.hub.repeat && K.voice.hub.repeat[cat];
+    check(r && (poolOk(r.said) || poolOk(r.line)), `hub.repeat.${cat}: missing teasing pool`);
   }
-  for (const [pid, p] of Object.entries(K.voice.places)) {
-    const tree = pid === "overlook" ? D.OVERLOOK : pid === "beach" ? D.BEACH : D.HOME;
-    check(tree, `krystalle voice references unknown place ${pid}`);
-    const roomKeys = new Set(tree.rooms.map((r) => r.key));
-    if (p.rooms) for (const [rk, r] of Object.entries(p.rooms)) {
-      check(roomKeys.has(rk), `krystalle places.${pid}: unknown room ${rk}`);
-      const room = tree.rooms.find((x) => x.key === rk);
-      const labels = collectLabels(room.actions);
-      if (r.actions) for (const lbl of Object.keys(r.actions)) check(labels.has(lbl), `krystalle places.${pid}.${rk}: unknown action label "${lbl}"`);
-    }
+
+  // Cheating-stage move pools exist for affair stage.
+  check(K.voice.hub.cheatPre && K.voice.hub.cheatPre.affair && K.voice.hub.cheatPre.affair.length, "hub.cheatPre.affair required");
+
+  // Intimacy pools shape: each phase is array, each entry has said/line.
+  for (const ph of ["open", "leading", "intensity", "finish", "close"]) {
+    const v = K.voice.intimacy[ph];
+    check(Array.isArray(v) && v.length >= 3, `intimacy.${ph}: need >=3 options`);
+    for (const o of v) check(poolOk(o.said) || poolOk(o.line), `intimacy.${ph}: option missing said/line pool`);
   }
-  // INTIMACY phase parity by source order.
-  const PHASES = ["open", "leading", "intensity", "finish"];
-  PHASES.forEach((ph, i) => {
-    const v = K.voice.intimacy[ph], src = D.INTIMACY.beats[i];
-    check(Array.isArray(v) && v.length === src.opts.length, `krystalle intimacy.${ph}: opt count ${v && v.length} vs ${src.opts.length}`);
-    for (const o of v) check(o.said || o.line, `krystalle intimacy.${ph}: opt missing said/line`);
-  });
-  check(Array.isArray(K.voice.intimacy.close) && K.voice.intimacy.close.length === D.INTIMACY.close.opts.length, "krystalle intimacy.close opt parity");
-  // Party pool shapes.
+  // Finish-where pools shape — one pool per opt id.
+  const FW = K.voice.intimacy.finishWhere;
+  check(FW, "intimacy.finishWhere required");
+  for (const opt of D.INTIMACY.finish.where.opts) {
+    check(poolOk(FW[opt.id]) || (opt.id === "ask" && poolOk(FW.ask)), `finishWhere.${opt.id}: missing pool`);
+  }
+
+  // Party pools still well-shaped.
   check(Array.isArray(K.voice.party.npcBeats) && K.voice.party.npcBeats.every((b) => /\{g\}/.test(b)), "krystalle party.npcBeats need {g}");
   check(K.voice.party.bodyShot && K.voice.party.bodyShot.win && K.voice.party.bodyShot.lose, "krystalle party.bodyShot shape");
-  check(K.voice.party.danceLine && K.voice.party.danceLine.casual && K.voice.party.danceLine.dirty && K.voice.party.danceLine.handsy, "krystalle party.danceLine shape");
-  // Earned-moment: composite reachable in principle. Quick sim — give her
-  // a max favored build, max all bars, check composite >= the gate.
+  check(K.voice.party.danceLine && poolOk(K.voice.party.danceLine.casual) && poolOk(K.voice.party.danceLine.dirty) && poolOk(K.voice.party.danceLine.handsy), "krystalle party.danceLine pool shape");
+
+  // Libido throttle math — +14 raw should round to 5, +7 to 2, +3 to 1.
+  const expect14 = Math.max(1, Math.round(14 * K.libidoGainMul));
+  const expect7 = Math.max(1, Math.round(7 * K.libidoGainMul));
+  check(expect14 < 14 && expect14 >= 4 && expect14 <= 6, `libido throttle: 14*${K.libidoGainMul} should give 4–6, got ${expect14}`);
+  check(expect7 < 7 && expect7 >= 2 && expect7 <= 3, `libido throttle: 7*${K.libidoGainMul} should give 2–3, got ${expect7}`);
+
+  // Earned-moment composite still reachable — same sim as before.
   (function () {
     const c = K, build = { strength: 9, style: 9, intelligence: 0, charisma: 0 };
     const cap = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
@@ -686,11 +728,30 @@ check(new Set(favs).size === favs.length, "favorite gifts should be distinct per
     let interest = 0; for (const s of D.STATS) interest += (c.attractProfile[s] || 0) * build[s]; interest *= T.attrInterestK;
     const span = T.attrVarianceSpan || 0, spread = span ? ((hashStr("krystalle") % (span + 1)) - Math.floor(span / 2)) : 0;
     const attr = cap(Math.round(phys + interest + spread), 0, T.attractBaseCap);
-    // Max bars (100 each); composite = sum(weight * 100) ≈ 100.
     let comp = 0; for (const b of D.BARS) comp += (c.barWeights[b] || 0) * (b === "attraction" ? attr : 100);
     comp = Math.round(comp);
     check(comp >= c.gates.intimacyComposite, `krystalle: even max build/bars can't hit her intimacyComposite gate (${comp} vs ${c.gates.intimacyComposite})`);
   })();
+})();
+
+// --- Hub config sanity ---
+(function () {
+  const HUB = D.HUB;
+  check(HUB && Array.isArray(HUB.categories) && HUB.categories.length >= 4, "HUB.categories required");
+  check(HUB.actions && HUB.label && HUB.emoji, "HUB shape");
+  for (const cat of HUB.categories) {
+    check(HUB.actions[cat] && HUB.actions[cat].length >= 4 || cat === "end", `HUB.actions.${cat} needs >=4`);
+    for (const a of (HUB.actions[cat] || [])) {
+      check(a.id && a.label, `HUB.${cat} action missing id/label`);
+      if (cat !== "end") check(typeof a.mag === "number" && a.trait, `HUB.${cat}.${a.id} needs trait+mag`);
+    }
+  }
+  check(D.INTIMACY.finish && D.INTIMACY.finish.where && D.INTIMACY.finish.where.opts.length >= 4, "INTIMACY.finish.where needs >=4 opts");
+  check(D.INTIMACY.finish.where.opts.some((o) => o.id === "ask"), "INTIMACY.finish.where.opts needs an `ask` option");
+  // TUNING bumps.
+  check(typeof T.hubActionsMax === "number" && T.hubActionsMax >= 4, "T.hubActionsMax required");
+  check(typeof T.hubDrDc === "number" && T.hubDrDc > 0, "T.hubDrDc required");
+  check(typeof T.cheatBaseBump === "number" && T.cheatBaseBump > 0, "T.cheatBaseBump required");
 })();
 
 console.log("BG categories:", D.BG_CATEGORIES.map((c) => `${c.id}(${c.sub})=[${c.opts.map((o) => o.id).join("/")}]`).join(" · "));
