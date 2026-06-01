@@ -1,0 +1,27 @@
+# Video footage and any media must never be committed (copyright; see docs/LEGAL_LICENSING.md)
+data/clips/
+data/interim/
+data/labels/
+data/outputs/
+models/
+
+# Model weights (downloaded on first run; regenerable)
+*.pt
+models/
+
+# Generated test fixture (recreated by scripts/verify_scaffold.py); keep the dir
+tests/fixtures/*
+!tests/fixtures/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+uv.lock
+
+# OS / editor
+.DS_Store

@@ -1,0 +1,63 @@
+<!--
+  Label Studio labeling interface for per-clip biomechanical metrics.
+  The choice values MUST match the enum values in src/nba_injury/schema/enums.py
+  so import_labels.py can coerce them directly.
+-->
+<View>
+  <Header value="Injury biomechanics — label the moment of injury/landing"/>
+  <Video name="video" value="$video"/>
+
+  <Text name="cv_hint" value="CV suggestions (assistance only — confirm or correct): $cv_suggestions"/>
+
+  <Header value="Takeoff: how many feet did the player jump off?"/>
+  <Choices name="takeoff_feet" toName="video" choice="single-radio" required="true">
+    <Choice value="zero"/>
+    <Choice value="one"/>
+    <Choice value="two"/>
+    <Choice value="unknown"/>
+  </Choices>
+
+  <Header value="Landing: how many feet did the player land on?"/>
+  <Choices name="landing_feet" toName="video" choice="single-radio" required="true">
+    <Choice value="zero"/>
+    <Choice value="one"/>
+    <Choice value="two"/>
+    <Choice value="unknown"/>
+  </Choices>
+
+  <Header value="Landing surface: first body part to hit the ground"/>
+  <Choices name="landing_surface" toName="video" choice="single-radio" required="true">
+    <Choice value="feet"/>
+    <Choice value="knee"/>
+    <Choice value="hip_back"/>
+    <Choice value="hand_arm"/>
+    <Choice value="other"/>
+    <Choice value="unknown"/>
+  </Choices>
+
+  <Header value="Motion state at the moment of the event"/>
+  <Choices name="motion_state" toName="video" choice="single-radio" required="true">
+    <Choice value="stationary"/>
+    <Choice value="moving"/>
+    <Choice value="unknown"/>
+  </Choices>
+
+  <Header value="Interference from another player"/>
+  <Choices name="interference" toName="video" choice="single-radio" required="true">
+    <Choice value="none"/>
+    <Choice value="stepped_on_foot"/>
+    <Choice value="shoved_contact"/>
+    <Choice value="collision"/>
+    <Choice value="other"/>
+    <Choice value="unknown"/>
+  </Choices>
+
+  <Header value="Event frame index (scrub to the injury/landing moment)"/>
+  <Number name="event_frame" toName="video" min="0"/>
+
+  <Header value="Labeler confidence (0-1)"/>
+  <Number name="confidence" toName="video" min="0" max="1" step="0.1" defaultValue="1"/>
+
+  <Header value="Labeler ID"/>
+  <TextArea name="labeler_id" toName="video" maxSubmissions="1" rows="1"/>
+</View>
