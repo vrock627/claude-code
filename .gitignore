@@ -1,2 +1,10 @@
 .DS_Store
 
+# NBA injury pipeline: local venv + generated data/checkpoints
+venv/
+nba_injuries_2023_2026.csv
+nba_injuries_2023_2026.xlsx
+processed_injuries.txt
+*.mp4
+
+__pycache__/
