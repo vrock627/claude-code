@@ -302,6 +302,185 @@ def fetch_pst_injuries(start_date, end_date):
     return pd.concat(all_rows, ignore_index=True)
 
 
+# ---------------------------------------------------------------------------
+# Hashtag Basketball injury database (alternative to PST)
+# ---------------------------------------------------------------------------
+# hashtagbasketball.com/nba-injury is an injury database going back to 2010 that,
+# unlike PST, usually carries the RETURN date / time-missed on the same row as
+# the injury -- so severity can come straight from the source instead of pairing
+# separate "relinquished" and "acquired" entries.
+#
+# ALLOWLIST: this host must be added to the environment's egress allowlist or
+# every request comes back "Host not in allowlist" (HTTP 403, 21-byte body).
+# See https://code.claude.com/docs/en/claude-code-on-the-web (network policy).
+#
+# SHAPE: the page is ASP.NET (.aspx). The exact response shape -- a static HTML
+# <table>, a JSON/XHR feed, or a viewstate-driven postback with season/date
+# filtering and pagination -- must be confirmed against the LIVE page the first
+# time this runs from an allowlisted network. fetch_hashtag_injuries() is the
+# only function whose body depends on that; parse_hashtag_injuries() is written
+# to be column-name-agnostic so it survives whatever headers come back.
+
+HASHTAG_URL = "https://hashtagbasketball.com/nba-injury"
+
+
+def _blocked_response(resp):
+    """True if the proxy allowlist or Cloudflare swallowed the request."""
+    head = resp.text[:600]
+    return (
+        resp.status_code == 403
+        or "Host not in allowlist" in head
+        or "Just a moment" in head
+    )
+
+
+def fetch_hashtag_injuries(start_date, end_date):
+    """
+    Return a raw DataFrame of hashtagbasketball injuries overlapping
+    ['YYYY-MM-DD' start, end]. Filtering to the window is left to
+    parse_hashtag_injuries so the fetch stays a thin transport layer.
+
+    NOTE: validate the extraction below against the live page once the host is
+    allowlisted (see SHAPE comment above). The default path assumes the injuries
+    render as an HTML table; if the page instead exposes a JSON/XHR feed or needs
+    a season/date postback, swap the body for that here -- callers and the parser
+    don't change.
+    """
+    empty = pd.DataFrame()
+    resp = requests.get(HASHTAG_URL, headers=DOWNLOAD_HEADERS, timeout=30)
+    if _blocked_response(resp):
+        print(
+            "    WARNING: hashtagbasketball.com is unreachable from this network "
+            "(403). Add 'hashtagbasketball.com' to the environment's egress "
+            "allowlist, then re-run.",
+            file=sys.stderr,
+        )
+        return empty
+    resp.raise_for_status()
+
+    try:
+        tables = pd.read_html(StringIO(resp.text))
+    except ValueError:  # pandas raises when no table is found in the HTML
+        tables = []
+    if not tables:
+        print(
+            "    WARNING: no injury table found at hashtagbasketball.com/nba-injury "
+            "-- the page shape likely changed; inspect it and update "
+            "fetch_hashtag_injuries().",
+            file=sys.stderr,
+        )
+        return empty
+
+    # The injury log is the widest table on the page (same idiom as PST).
+    df = max(tables, key=lambda t: t.shape[1])
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+# Loose header -> canonical field mapping. Matched by substring (lowercased) so
+# the parser tolerates the site's exact wording ("Player", "Name", "Injury",
+# "Status", "Returned", "Days Missed", etc.).
+_HASHTAG_FIELDS = {
+    "player": ["player", "name"],
+    "team": ["team"],
+    "date": ["injury date", "date out", "date"],
+    "notes": ["injury", "note", "status", "type", "description"],
+    "return_date": ["return date", "returned", "date returned", "back"],
+    "time_missed": ["days missed", "games missed", "time missed", "duration"],
+}
+
+
+def _pick_column(columns, keywords, used=()):
+    """First not-yet-used column whose header contains any keyword, else None."""
+    low = {c: str(c).lower() for c in columns}
+    for kw in keywords:
+        for c in columns:
+            if c not in used and kw in low[c]:
+                return c
+    return None
+
+
+def _parse_date(value):
+    """Best-effort date parse across the formats these sources use."""
+    s = str(value).strip()
+    if not s or s.lower() == "nan":
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%b %d, %Y", "%B %d, %Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    try:  # last resort: let pandas guess
+        ts = pd.to_datetime(s, errors="coerce")
+        return None if pd.isna(ts) else ts.date()
+    except (ValueError, TypeError):
+        return None
+
+
+def parse_hashtag_injuries(df, start_date=None, end_date=None):
+    """
+    Map a hashtagbasketball injury DataFrame onto the pipeline's injury contract:
+    return (injuries, returns_by_player) exactly like parse_pst_events(), so the
+    batch driver is source-agnostic.
+
+    Each injury dict carries player_raw/player_norm/team_raw/date/notes, plus an
+    optional return_date and time_missed when the source provides them (lets
+    estimate_time_missed report severity straight from the row).
+    """
+    from collections import defaultdict
+
+    injuries = []
+    returns_by_player = defaultdict(list)
+    if df is None or df.empty:
+        return injuries, returns_by_player
+
+    # Resolve the more specific fields first and never reuse a column, so e.g.
+    # "Injury Date" is claimed as the date -- not mistaken for the "Injury" note.
+    cols = list(df.columns)
+    col, used = {}, set()
+    for field in ("date", "return_date", "time_missed", "player", "team", "notes"):
+        chosen = _pick_column(cols, _HASHTAG_FIELDS[field], used)
+        col[field] = chosen
+        if chosen is not None:
+            used.add(chosen)
+    lo = _parse_date(start_date) if start_date else None
+    hi = _parse_date(end_date) if end_date else None
+
+    for _, row in df.iterrows():
+        player_raw = str(row[col["player"]]).strip() if col["player"] else ""
+        if not player_raw or player_raw.lower() == "nan":
+            continue
+        d = _parse_date(row[col["date"]]) if col["date"] else None
+        if d is None:
+            continue
+        if (lo and d < lo) or (hi and d > hi):
+            continue
+
+        ret = _parse_date(row[col["return_date"]]) if col["return_date"] else None
+        time_missed = ""
+        if col["time_missed"]:
+            tm = str(row[col["time_missed"]]).strip()
+            if tm and tm.lower() != "nan":
+                time_missed = tm
+        player_norm = _normalize_name(player_raw)
+
+        injuries.append({
+            "player_raw": player_raw,
+            "player_norm": player_norm,
+            "team_raw": str(row[col["team"]]).strip() if col["team"] else "",
+            "date": d,
+            "notes": str(row[col["notes"]]).strip() if col["notes"] else "",
+            "return_date": ret,
+            "time_missed": time_missed,
+        })
+        if ret:
+            returns_by_player[player_norm].append(ret)
+
+    for k in returns_by_player:
+        returns_by_player[k].sort()
+    return injuries, returns_by_player
+
+
 def confirm_with_pst(player_name, game_date, pst_df, window_days=PST_WINDOW_DAYS):
     """
     Return the matching PST injury note if `player_name` has a Relinquished

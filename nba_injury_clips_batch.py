@@ -30,11 +30,15 @@ SETUP
 
 USAGE
 -----
-    python nba_injury_clips_batch.py --season 2023-24
-    python nba_injury_clips_batch.py --season 2024-25
-    python nba_injury_clips_batch.py --season 2025-26
-    python nba_injury_clips_batch.py              # all three seasons
+    python nba_injury_clips_batch.py --season 2024-25            # default source
+    python nba_injury_clips_batch.py --season 2024-25 --source hashtag
+    python nba_injury_clips_batch.py --season 2024-25 --source pst
+    python nba_injury_clips_batch.py                             # all 3 seasons
     python nba_injury_clips_batch.py --finalize   # merge checkpoint -> .xlsx
+
+--source picks the injury LOG that seeds the run (default: hashtag):
+  - hashtag : hashtagbasketball.com/nba-injury (DB since 2010, has return time)
+  - pst     : prosportstransactions.com (Cloudflare-blocked from DC IPs)
 
 This is far lighter than scanning all games, but still hits an unofficial API,
 so it sleeps between calls and checkpoints every injury. If it stops or you get
@@ -42,14 +46,17 @@ blocked, just re-run -- it resumes. Running one season at a time is safest.
 
 NETWORK REQUIREMENTS
 --------------------
-Two of the three hosts this driver depends on block datacenter / CI IPs:
+The driver is seeded ENTIRELY from the injury log, so it produces zero rows if
+that host is unreachable. Hosts touched:
   - stats.nba.com (play-by-play, schedule) ...... works from most IPs
-  - prosportstransactions.com (the injury LOG) .. Cloudflare-blocks DC IPs (403)
+  - hashtagbasketball.com (default injury LOG) .. must be on the egress allowlist
+  - prosportstransactions.com (--source pst) .... Cloudflare-blocks DC IPs (403)
   - videos.nba.com (clip download bytes) ........ blocks DC IPs (403)
-Because this driver is seeded ENTIRELY from the PST injury log, it produces
-zero rows when PST is blocked. Run it from a residential / unblocked network.
-Clip *URLs* still resolve fine anywhere (via stats.nba.com); only downloading
-the mp4 bytes needs an unblocked IP.
+In a locked-down environment, add the chosen injury host (and videos.nba.com if
+you want --download) to the network allowlist:
+https://code.claude.com/docs/en/claude-code-on-the-web . Clip *URLs* still
+resolve anywhere via stats.nba.com; only downloading the mp4 bytes needs the
+videos host.
 """
 
 import sys
@@ -67,6 +74,8 @@ from nba_injury_clips import (
     find_injury_candidates,
     extract_clip_url,
     fetch_pst_injuries,
+    fetch_hashtag_injuries,
+    parse_hashtag_injuries,
     _normalize_name,
     SLEEP_BETWEEN_CALLS,
     PST_WINDOW_DAYS,
@@ -88,13 +97,41 @@ COLUMNS = ["name", "date", "injury_desc", "severity", "play_by_play_url"]
 # PST and report the day gap. Falls back to the note ("out for season") or
 # "unknown" when no return is logged in the fetched range.
 # ---------------------------------------------------------------------------
-def estimate_time_missed(player_norm, injury_date, returns_by_player, notes):
+def estimate_time_missed(injury, returns_by_player):
+    notes = injury.get("notes", "")
     if "season" in (notes or "").lower():
         return "season-ending"
-    future = [d for d in returns_by_player.get(player_norm, []) if d > injury_date]
+    # A source that reports time-missed / a return date on the injury row itself
+    # (e.g. hashtagbasketball) wins -- no relinquished<->acquired pairing needed.
+    if injury.get("time_missed"):
+        return injury["time_missed"]
+    injury_date = injury["date"]
+    ret = injury.get("return_date")
+    if ret:
+        return f"{(ret - injury_date).days} days"
+    future = [
+        d for d in returns_by_player.get(injury["player_norm"], []) if d > injury_date
+    ]
     if future:
         return f"{(min(future) - injury_date).days} days"
     return "unknown (no return logged)"
+
+
+DEFAULT_SOURCE = "hashtag"
+SOURCES = ("hashtag", "pst")
+
+
+def load_injuries(source, start, end):
+    """Return (injuries, returns_by_player) for the chosen injury source.
+
+    Both backends satisfy the same contract, so everything downstream
+    (scheduling, candidate finding, clip resolution) is source-agnostic.
+    """
+    if source == "hashtag":
+        return parse_hashtag_injuries(fetch_hashtag_injuries(start, end), start, end)
+    if source == "pst":
+        return parse_pst_events(fetch_pst_injuries(start, end))
+    raise ValueError(f"unknown --source {source!r}; choose from {SOURCES}")
 
 
 def parse_pst_events(pst_df):
@@ -180,9 +217,7 @@ def names_match(a_norm, b_norm):
 # Process one logged injury
 # ---------------------------------------------------------------------------
 def process_injury(injury, team_games, returns_by_player, pbp_cache):
-    severity = estimate_time_missed(
-        injury["player_norm"], injury["date"], returns_by_player, injury["notes"]
-    )
+    severity = estimate_time_missed(injury, returns_by_player)
     url = ""
     used_date = injury["date"]
 
@@ -288,6 +323,11 @@ def main():
         finalize()
         return
 
+    source = args[args.index("--source") + 1] if "--source" in args else DEFAULT_SOURCE
+    if source not in SOURCES:
+        print(f"unknown --source {source!r}; choose from {SOURCES}")
+        sys.exit(1)
+
     seasons = [args[args.index("--season") + 1]] if "--season" in args else SEASONS
     processed = load_processed()
 
@@ -298,9 +338,8 @@ def main():
         start = min(all_dates).isoformat()
         end = (max(all_dates) + timedelta(days=PST_WINDOW_DAYS)).isoformat()
 
-        print(f"Fetching PST injuries {start} -> {end} ...")
-        pst_df = fetch_pst_injuries(start, end)
-        injuries, returns_by_player = parse_pst_events(pst_df)
+        print(f"Fetching {source} injuries {start} -> {end} ...")
+        injuries, returns_by_player = load_injuries(source, start, end)
         print(f"{len(injuries)} logged injuries to map.")
 
         pbp_cache = {}
