@@ -39,6 +39,17 @@ USAGE
 This is far lighter than scanning all games, but still hits an unofficial API,
 so it sleeps between calls and checkpoints every injury. If it stops or you get
 blocked, just re-run -- it resumes. Running one season at a time is safest.
+
+NETWORK REQUIREMENTS
+--------------------
+Two of the three hosts this driver depends on block datacenter / CI IPs:
+  - stats.nba.com (play-by-play, schedule) ...... works from most IPs
+  - prosportstransactions.com (the injury LOG) .. Cloudflare-blocks DC IPs (403)
+  - videos.nba.com (clip download bytes) ........ blocks DC IPs (403)
+Because this driver is seeded ENTIRELY from the PST injury log, it produces
+zero rows when PST is blocked. Run it from a residential / unblocked network.
+Clip *URLs* still resolve fine anywhere (via stats.nba.com); only downloading
+the mp4 bytes needs an unblocked IP.
 """
 
 import sys
@@ -120,7 +131,7 @@ def build_schedule(season):
     for stype in SEASON_TYPES:
         log = leaguegamelog.LeagueGameLog(
             season=season, season_type_all_star=stype
-        ).get_data_frame()
+        ).league_game_log.get_data_frame()
         for _, r in log.iterrows():
             try:
                 d = datetime.strptime(str(r["GAME_DATE"])[:10], "%Y-%m-%d").date()
@@ -184,6 +195,8 @@ def process_injury(injury, team_games, returns_by_player, pbp_cache):
             time.sleep(SLEEP_BETWEEN_CALLS)
         for c in find_injury_candidates(pbp_cache[gid]):
             if names_match(_normalize_name(c["player"]), injury["player_norm"]):
+                if not c["video_available"]:
+                    break  # no real clip for that play (sub/timeout/etc.)
                 ymd = (gdate.year, gdate.month, gdate.day)
                 time.sleep(SLEEP_BETWEEN_CALLS)
                 url = extract_clip_url(gid, c["injury_play_eventnum"], ymd) or ""

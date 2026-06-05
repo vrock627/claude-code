@@ -27,6 +27,18 @@ The video endpoint is undocumented and the NBA changes it periodically.
 If clip resolution stops working, the field names in
 `extract_clip_url()` are the first thing to check.
 
+API NOTE (2026 migration)
+-------------------------
+The NBA retired the v2 stats feeds this pipeline was first written against:
+`playbyplayv2` now returns empty JSON, and `videoevents` was replaced by
+`videoeventsasset`. This module targets the current endpoints:
+  - play-by-play   -> playbyplayv3
+  - clip resolution -> videoeventsasset
+The v3 play-by-play schema is different (actionType / subType / actionNumber /
+personId instead of EVENTMSGTYPE / EVENTNUM / PLAYER1_ID), and a substitution
+row only carries the OUTGOING player as a real id -- the incoming player is
+text-only in the description ("SUB: <in> FOR <out>"). See find_injury_candidates.
+
 SETUP
 -----
     pip install nba_api requests pandas
@@ -45,6 +57,7 @@ Tip: regular-season game_ids look like 00223000XX where 223 = 2023-24
 season. You can get game_ids for a date from nba_api's `scoreboardv2`.
 """
 
+import re
 import sys
 import time
 from datetime import datetime, date, timedelta
@@ -53,9 +66,9 @@ from io import StringIO
 import requests
 import pandas as pd
 from nba_api.stats.endpoints import (
-    playbyplayv2,
+    playbyplayv3,
     boxscoresummaryv2,
-    videoevents,
+    videoeventsasset,
 )
 
 # stats.nba.com data calls are handled by nba_api's own headers, but the
@@ -71,7 +84,11 @@ DOWNLOAD_HEADERS = {
 # Be polite to the (unofficial) API. Raise if you start getting blocked.
 SLEEP_BETWEEN_CALLS = 0.8
 
-SUBSTITUTION = 8  # EVENTMSGTYPE code for a substitution in playbyplayv2
+# v3 marks substitutions by actionType, not a numeric EVENTMSGTYPE code.
+SUBSTITUTION = "Substitution"
+
+# "SUB: <incoming> FOR <outgoing>" -- the incoming player is text-only in v3.
+_SUB_RE = re.compile(r"SUB:\s*(.+?)\s+FOR\s+", re.IGNORECASE)
 
 
 def get_game_date(game_id):
@@ -83,10 +100,18 @@ def get_game_date(game_id):
     return dt.year, dt.month, dt.day
 
 
+def _clock_to_str(iso_clock):
+    """v3 clock is an ISO-8601 duration like 'PT06M43.00S' -> '6:43'."""
+    m = re.match(r"PT(\d+)M([\d.]+)S", str(iso_clock))
+    if not m:
+        return str(iso_clock)
+    return f"{int(m.group(1))}:{int(float(m.group(2))):02d}"
+
+
 def get_play_by_play(game_id):
-    """Return the full play-by-play as a sorted DataFrame."""
-    pbp = playbyplayv2.PlayByPlayV2(game_id=game_id).get_data_frame()
-    return pbp.sort_values("EVENTNUM").reset_index(drop=True)
+    """Return the full v3 play-by-play as a DataFrame sorted by action order."""
+    pbp = playbyplayv3.PlayByPlayV3(game_id=game_id).play_by_play.get_data_frame()
+    return pbp.sort_values("actionNumber").reset_index(drop=True)
 
 
 def find_injury_candidates(pbp):
@@ -94,54 +119,64 @@ def find_injury_candidates(pbp):
     Find players whose LAST substitution event was a sub-OUT (they never
     came back in). For each, also grab the event right before they exited,
     which is usually the play the injury happened on.
-    """
-    subs = pbp[pbp["EVENTMSGTYPE"] == SUBSTITUTION]
 
-    # In a sub event: PLAYER1 = player going OUT, PLAYER2 = player coming IN.
-    # (Verify this on a known game once -- it's the classic gotcha.)
-    events_by_player = {}  # player_id -> list of (eventnum, "out"|"in", row)
+    v3 gotcha: a Substitution row's personId / playerName is the OUTGOING
+    player. The incoming player is only in the description ("SUB: <in> FOR
+    <out>") as a last name, so we match returns by last name. When two active
+    players share a last name this can mis-credit a return -- a known limit of
+    the v3 feed that the old v2 PLAYER2_ID approach didn't have. PST cross-check
+    downstream still gates the output, so treat this as a candidate filter only.
+    """
+    subs = pbp[pbp["actionType"] == SUBSTITUTION]
+
+    # Map last name -> personId so we can resolve the text-only incoming player.
+    lastname_to_pid = {}
     for _, r in subs.iterrows():
-        out_id, in_id = r["PLAYER1_ID"], r["PLAYER2_ID"]
-        if pd.notna(out_id) and out_id != 0:
-            events_by_player.setdefault(int(out_id), []).append(
-                (r["EVENTNUM"], "out", r)
-            )
-        if pd.notna(in_id) and in_id != 0:
-            events_by_player.setdefault(int(in_id), []).append(
-                (r["EVENTNUM"], "in", r)
-            )
+        lastname_to_pid[str(r["playerName"]).strip()] = int(r["personId"])
+
+    events_by_player = {}  # player_id -> list of (actionNumber, "out"|"in", row)
+    for _, r in subs.iterrows():
+        out_id = int(r["personId"])
+        events_by_player.setdefault(out_id, []).append(
+            (int(r["actionNumber"]), "out", r)
+        )
+        m = _SUB_RE.match(str(r["description"]))
+        if m:
+            in_pid = lastname_to_pid.get(m.group(1).strip())
+            if in_pid is not None:
+                events_by_player.setdefault(in_pid, []).append(
+                    (int(r["actionNumber"]), "in", r)
+                )
 
     candidates = []
     for evs in events_by_player.values():
         evs.sort(key=lambda x: x[0])
-        last_eventnum, last_dir, last_row = evs[-1]
+        last_action, last_dir, last_row = evs[-1]
         if last_dir != "out":
             continue  # player came back in -> not a candidate
 
         # The injury play = the event immediately before the sub-out.
-        sub_idx = pbp.index[pbp["EVENTNUM"] == last_eventnum][0]
+        sub_idx = pbp.index[pbp["actionNumber"] == last_action][0]
         injury_row = pbp.loc[max(sub_idx - 1, 0)]
-        desc = (
-            injury_row["HOMEDESCRIPTION"]
-            or injury_row["VISITORDESCRIPTION"]
-            or injury_row["NEUTRALDESCRIPTION"]
-            or "(no description)"
-        )
+        desc = str(injury_row["description"]).strip() or "(no description)"
 
         candidates.append({
-            "player": last_row["PLAYER1_NAME"],
-            "exit_eventnum": int(last_eventnum),
-            "period": int(last_row["PERIOD"]),
-            "clock": last_row["PCTIMESTRING"],
-            "injury_play_eventnum": int(injury_row["EVENTNUM"]),
+            "player": last_row["playerNameI"] or last_row["playerName"],
+            "exit_eventnum": int(last_action),
+            "period": int(last_row["period"]),
+            "clock": _clock_to_str(last_row["clock"]),
+            "injury_play_eventnum": int(injury_row["actionNumber"]),
             "injury_play_desc": desc,
+            # v3 flags whether a clip exists; without this the video endpoint
+            # hands back a shared placeholder mp4 for sub/timeout/etc. events.
+            "video_available": bool(injury_row.get("videoAvailable", 0)),
         })
     return candidates
 
 
 def extract_clip_url(game_id, event_id, ymd):
     """Resolve a clip URL for a single play-by-play event."""
-    data = videoevents.VideoEvents(
+    data = videoeventsasset.VideoEventsAsset(
         game_id=game_id, game_event_id=event_id
     ).get_dict()
 
@@ -168,14 +203,24 @@ def extract_clip_url(game_id, event_id, ymd):
 
 
 def download_clip(url, filename):
-    """Stream an mp4 to disk. Used only with --download."""
-    import requests
-    with requests.get(url, headers=DOWNLOAD_HEADERS, stream=True, timeout=30) as r:
-        r.raise_for_status()
-        with open(filename, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1 << 16):
-                f.write(chunk)
-    print(f"    saved -> {filename}")
+    """Stream an mp4 to disk. Used only with --download.
+
+    videos.nba.com also blocks datacenter / CI IPs (403). We resolve clip URLs
+    fine from anywhere, but fetching the bytes may need a residential IP -- so
+    a failed download warns instead of killing the run.
+    """
+    try:
+        with requests.get(
+            url, headers=DOWNLOAD_HEADERS, stream=True, timeout=30
+        ) as r:
+            r.raise_for_status()
+            with open(filename, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 16):
+                    f.write(chunk)
+        print(f"    saved -> {filename}")
+    except requests.RequestException as e:
+        print(f"    download failed ({e}); URL above is still valid "
+              "-- try from an unblocked network", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +266,18 @@ def fetch_pst_injuries(start_date, end_date):
             f"&start={start}"
         )
         resp = requests.get(url, headers=DOWNLOAD_HEADERS, timeout=30)
+        # PST sits behind Cloudflare. From datacenter / CI IPs it often answers
+        # 403 with a JS challenge ("Just a moment...") instead of results. Don't
+        # crash the whole run for that -- warn once and return what we have so
+        # the caller can fall back to treating everything as unconfirmed.
+        if resp.status_code == 403 or "Just a moment" in resp.text[:600]:
+            print(
+                "    WARNING: Pro Sports Transactions is blocking this network "
+                "(Cloudflare 403). Skipping cross-check; run from an "
+                "unblocked IP to confirm injuries.",
+                file=sys.stderr,
+            )
+            break
         resp.raise_for_status()
         tables = pd.read_html(StringIO(resp.text))
         if not tables:
@@ -319,6 +376,10 @@ def main():
         # By default only resolve/download clips for PST-confirmed injuries.
         if not c["confirmed"] and not include_unconfirmed:
             print("    (skipped -- pass --include-unconfirmed to fetch anyway)\n")
+            continue
+
+        if not c["video_available"]:
+            print("    no clip available for that play (e.g. sub/timeout)\n")
             continue
 
         time.sleep(SLEEP_BETWEEN_CALLS)
