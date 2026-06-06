@@ -1,10 +1,10 @@
 """
 Offline unit tests for the NBA injury-clip pipeline.
 
-These exercise the *pure* logic (candidate detection, name matching, PST
-parsing, time-missed estimation, schedule mapping, clip-URL building, xlsx
-output) with synthetic data, so they run anywhere -- no network, no
-stats.nba.com / Pro Sports Transactions access required.
+These exercise the *pure* logic (candidate detection, name matching, the
+Hashtag Basketball injury-page parsing/confirm, schedule mapping, clip-URL
+building, xlsx output) with synthetic data, so they run anywhere -- no
+network, no stats.nba.com / hashtagbasketball.com access required.
 
     pip install -r requirements.txt pytest
     pytest test_nba_injury_clips.py -v
@@ -17,6 +17,7 @@ import pandas as pd
 
 import nba_injury_clips as nic
 import nba_injury_clips_batch as batch
+import hashtag_injuries as hi
 
 
 # ---------------------------------------------------------------------------
@@ -106,77 +107,142 @@ def test_normalize_name():
 
 
 # ---------------------------------------------------------------------------
-# confirm_with_pst
+# hashtag_injuries: detail-page parsing
 # ---------------------------------------------------------------------------
-def _pst(rows):
-    return pd.DataFrame(rows, columns=["Date", "Team", "Acquired",
-                                       "Relinquished", "Notes"])
+INJURY_PAGE_HTML = """
+<html><body>
+<h1><span id="ContentPlaceHolder1_FormView1_NOTESLabel">Sprained left ankle</span></h1>
+<table id="ContentPlaceHolder1_GridView1">
+  <tr><th scope="col">PLAYER</th><th scope="col">TEAM</th>
+      <th scope="col">INJURED ON</th><th scope="col">RETURNED</th>
+      <th scope="col">DAYS MISSED</th></tr>
+  <tr><td>Donovan Mitchell</td><td>Cavaliers</td>
+      <td><span id="x_Label1_0">07 April 2025</span></td>
+      <td><span id="x_Label2_0">19 April 2025</span></td><td>12</td></tr>
+  <tr><td>Still Out</td><td>Heat</td>
+      <td><span id="x_Label1_1">01 May 2025</span></td>
+      <td></td><td></td></tr>
+</table>
+</body></html>
+"""
 
 
-def test_confirm_with_pst_matches_in_window():
-    pst = _pst([
-        ("2023-10-25", "Lakers", "", "• LeBron James", "sore foot (DTD)"),
+def test_parse_injury_page():
+    df = hi.parse_injury_page(INJURY_PAGE_HTML)
+    assert list(df.columns) == [
+        "player", "player_norm", "team", "date", "returned",
+        "days_missed", "injury_desc",
+    ]
+    assert len(df) == 2
+
+    dm = df.iloc[0]
+    assert dm["player"] == "Donovan Mitchell"
+    assert dm["player_norm"] == "donovan mitchell"
+    assert dm["team"] == "Cavaliers"
+    assert dm["date"] == dt.date(2025, 4, 7)
+    assert dm["returned"] == dt.date(2025, 4, 19)
+    assert dm["days_missed"] == 12
+    assert dm["injury_desc"] == "Sprained left ankle"
+
+    out = df.iloc[1]
+    assert out["date"] == dt.date(2025, 5, 1)
+    assert out["returned"] is None          # blank RETURNED
+    assert hi._missing(out["days_missed"])   # blank DAYS MISSED
+
+
+def test_parse_injury_page_missing_table():
+    df = hi.parse_injury_page("<html><body>no table here</body></html>")
+    assert df.empty
+    assert "player" in df.columns
+
+
+def test_parse_slug_results():
+    html = """
+      <table id="ContentPlaceHolder1_GridView2">
+        <tr><th>INJURY</th></tr>
+        <tr><td><a href="/injury/sprained-left-ankle">Sprained left ankle</a></td></tr>
+        <tr><td><a href="/injury/sore-right-knee">Sore right knee</a></td></tr>
+      </table>
+    """
+    slugs = hi.parse_slug_results(html)
+    assert slugs == {
+        "sprained-left-ankle": "Sprained left ankle",
+        "sore-right-knee": "Sore right knee",
+    }
+
+
+def test_hidden_fields():
+    html = (
+        '<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="VS123" />'
+        '<input type="hidden" name="__VIEWSTATEGENERATOR" '
+        'id="__VIEWSTATEGENERATOR" value="GEN9" />'
+        '<input type="hidden" name="__EVENTVALIDATION" '
+        'id="__EVENTVALIDATION" value="EV456" />'
+    )
+    f = hi._hidden_fields(html)
+    assert f == {
+        "__VIEWSTATE": "VS123",
+        "__VIEWSTATEGENERATOR": "GEN9",
+        "__EVENTVALIDATION": "EV456",
+    }
+
+
+# ---------------------------------------------------------------------------
+# hashtag_injuries: severity + confirm
+# ---------------------------------------------------------------------------
+def test_format_severity():
+    assert hi.format_severity(14, dt.date(2024, 1, 15)) == "14 days"
+    assert hi.format_severity(12.0, None) == "12 days"          # float -> int
+    assert hi.format_severity(None, None) == "unknown (no return logged)"
+    assert hi.format_severity(np.nan, None) == "unknown (no return logged)"
+    assert hi.format_severity(None, dt.date(2024, 1, 15)) == "unknown"
+
+
+def _injuries(rows):
+    return pd.DataFrame(rows, columns=[
+        "player", "player_norm", "team", "date", "returned",
+        "days_missed", "injury_desc",
     ])
-    note = nic.confirm_with_pst("LeBron James", dt.date(2023, 10, 24), pst)
-    assert note == "sore foot (DTD)"
 
 
-def test_confirm_with_pst_lastname_fallback():
-    pst = _pst([
-        ("2023-10-24", "Suns", "", "• Bradley Beal", "back spasms"),
+def test_confirm_injury_in_window():
+    df = _injuries([
+        ["LeBron James", "lebron james", "Lakers", dt.date(2023, 10, 25),
+         dt.date(2023, 11, 8), 14, "Sore left foot"],
     ])
-    # First name differs/abbreviated but last name token matches.
-    note = nic.confirm_with_pst("B. Beal", dt.date(2023, 10, 24), pst)
-    assert note == "back spasms"
+    note = hi.confirm_injury("LeBron James", dt.date(2023, 10, 24), df, 2)
+    assert note == "Sore left foot (14 days)"
 
 
-def test_confirm_with_pst_out_of_window_returns_none():
-    pst = _pst([
-        ("2023-11-10", "Lakers", "", "• LeBron James", "sore foot"),
+def test_confirm_injury_lastname_fallback_and_still_out():
+    df = _injuries([
+        ["Bradley Beal", "bradley beal", "Suns", dt.date(2023, 10, 24),
+         None, np.nan, "Back spasms"],
     ])
-    assert nic.confirm_with_pst("LeBron James", dt.date(2023, 10, 24), pst) is None
+    note = hi.confirm_injury("B. Beal", dt.date(2023, 10, 24), df, 2)
+    assert note == "Back spasms (unknown (no return logged))"
 
 
-def test_confirm_with_pst_empty():
-    empty = pd.DataFrame(columns=["Date", "Relinquished", "Notes"])
-    assert nic.confirm_with_pst("Anyone", dt.date(2023, 10, 24), empty) is None
-
-
-# ---------------------------------------------------------------------------
-# batch: estimate_time_missed
-# ---------------------------------------------------------------------------
-def test_estimate_time_missed_season_ending():
-    out = batch.estimate_time_missed("x", dt.date(2024, 1, 1), {}, "out for season (ACL)")
-    assert out == "season-ending"
-
-
-def test_estimate_time_missed_day_gap():
-    returns = {"john doe": [dt.date(2024, 1, 1), dt.date(2024, 1, 15)]}
-    out = batch.estimate_time_missed("john doe", dt.date(2024, 1, 1), returns, "ankle")
-    assert out == "14 days"
-
-
-def test_estimate_time_missed_unknown():
-    out = batch.estimate_time_missed("john doe", dt.date(2024, 1, 1), {}, "ankle")
-    assert out == "unknown (no return logged)"
-
-
-# ---------------------------------------------------------------------------
-# batch: parse_pst_events
-# ---------------------------------------------------------------------------
-def test_parse_pst_events_splits_and_sorts():
-    pst = _pst([
-        ("2024-01-01", "Heat", "", "• Jimmy Butler", "knee (DTD)"),
-        ("2024-01-20", "Heat", "• Jimmy Butler", "", "returned"),
-        ("2024-01-10", "Heat", "• Jimmy Butler", "", "returned (G-League)"),
+def test_confirm_injury_out_of_window_and_empty():
+    df = _injuries([
+        ["LeBron James", "lebron james", "Lakers", dt.date(2023, 11, 20),
+         None, np.nan, "foot"],
     ])
-    injuries, returns = batch.parse_pst_events(pst)
-    assert len(injuries) == 1
-    assert injuries[0]["player_raw"] == "Jimmy Butler"
-    assert injuries[0]["player_norm"] == "jimmy butler"
-    assert injuries[0]["date"] == dt.date(2024, 1, 1)
-    # returns sorted ascending
-    assert returns["jimmy butler"] == [dt.date(2024, 1, 10), dt.date(2024, 1, 20)]
+    assert hi.confirm_injury("LeBron James", dt.date(2023, 10, 24), df, 2) is None
+
+    empty = _injuries([]).iloc[0:0]
+    assert hi.confirm_injury("Anyone", dt.date(2023, 10, 24), empty, 2) is None
+
+
+def test_confirm_injury_skips_null_dates():
+    # A null/NaN date must not crash the scan (iterrows would upcast it).
+    df = _injuries([
+        ["Ghost Player", "ghost player", "Nets", None, None, np.nan, "n/a"],
+        ["LeBron James", "lebron james", "Lakers", dt.date(2023, 10, 25),
+         dt.date(2023, 11, 8), 14, "foot"],
+    ])
+    assert hi.confirm_injury("LeBron James", dt.date(2023, 10, 24), df, 2) \
+        == "foot (14 days)"
 
 
 # ---------------------------------------------------------------------------
@@ -198,14 +264,13 @@ def test_find_injury_game_picks_closest_on_or_before():
             (dt.date(2024, 1, 6), "G3"),   # after the log date -> excluded
         ]
     }
-    injury = {"team_raw": "Lakers", "date": dt.date(2024, 1, 4)}
-    assert batch.find_injury_game(injury, team_games) == (dt.date(2024, 1, 3), "G2")
+    assert batch.find_injury_game("Lakers", dt.date(2024, 1, 4), team_games) \
+        == (dt.date(2024, 1, 3), "G2")
 
 
 def test_find_injury_game_no_game_in_window():
     team_games = {"Los Angeles Lakers": [(dt.date(2024, 1, 1), "G1")]}
-    injury = {"team_raw": "Lakers", "date": dt.date(2024, 1, 10)}
-    assert batch.find_injury_game(injury, team_games) is None
+    assert batch.find_injury_game("Lakers", dt.date(2024, 1, 10), team_games) is None
 
 
 def test_names_match():

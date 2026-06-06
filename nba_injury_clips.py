@@ -19,9 +19,9 @@ returned" signal is a heuristic, so it WILL also catch:
   - foul-outs and ejections
   - normal end-of-game substitutions
 Treat the output as candidates to eyeball, not ground truth. The script
-prints period + game clock for each so you can judge quickly, and you can
-cross-reference against an injury news source (Pro Sports Transactions,
-Rotowire) to confirm.
+prints period + game clock for each so you can judge quickly, and it
+cross-references each against an injury log (Hashtag Basketball's NBA
+Injury Database -- see hashtag_injuries.py) to confirm.
 
 The video endpoint is undocumented and the NBA changes it periodically.
 If clip resolution stops working, the field names in
@@ -29,7 +29,7 @@ If clip resolution stops working, the field names in
 
 SETUP
 -----
-    pip install nba_api requests pandas
+    pip install nba_api requests pandas lxml
 
 USAGE
 -----
@@ -37,9 +37,10 @@ USAGE
     python nba_injury_clips.py 0022300001 --download
     python nba_injury_clips.py 0022300001 --include-unconfirmed
 
-Candidates are cross-checked against Pro Sports Transactions. By default
-only PST-confirmed injuries get a clip resolved/downloaded; pass
---include-unconfirmed to fetch clips for every candidate.
+Candidates are cross-checked against the Hashtag Basketball injury log. By
+default only confirmed injuries get a clip resolved/downloaded; pass
+--include-unconfirmed to fetch clips for every candidate. (The log is
+scraped once and cached on disk, so the first run is slower.)
 
 Tip: regular-season game_ids look like 00223000XX where 223 = 2023-24
 season. You can get game_ids for a date from nba_api's `scoreboardv2`.
@@ -47,8 +48,7 @@ season. You can get game_ids for a date from nba_api's `scoreboardv2`.
 
 import sys
 import time
-from datetime import datetime, date, timedelta
-from io import StringIO
+from datetime import datetime, date
 
 import requests
 import pandas as pd
@@ -181,7 +181,6 @@ def extract_clip_url(game_id, event_id, ymd):
 
 def download_clip(url, filename):
     """Stream an mp4 to disk. Used only with --download."""
-    import requests
     with requests.get(url, headers=DOWNLOAD_HEADERS, stream=True, timeout=30) as r:
         r.raise_for_status()
         with open(filename, "wb") as f:
@@ -191,23 +190,8 @@ def download_clip(url, filename):
 
 
 # ---------------------------------------------------------------------------
-# Pro Sports Transactions (PST) cross-check
+# Name matching
 # ---------------------------------------------------------------------------
-# PST logs injuries by DATE. A player hurt in a game is usually entered on the
-# game date or within a day or two, when the team files the IL move / report.
-# We match each candidate against PST's "Relinquished" column (the player going
-# OUT) within a small date window. This drops most false positives (blowout
-# rest, foul-outs, ejections).
-#
-# Caveat: it can also drop a REAL injury that PST never logged (e.g. a tweak
-# that didn't lead to an IL move), so "unconfirmed" is not proof there was no
-# injury -- just that PST has no matching entry. PST's HTML can change; if
-# parsing breaks, inspect a results page by hand and adjust the column logic.
-
-PST_BASE = "https://www.prosportstransactions.com/basketball/Search/SearchResults.php"
-PST_WINDOW_DAYS = 2  # allow the injury to be logged up to N days after the game
-
-
 def _normalize_name(name):
     """Lowercase and strip bullets/punctuation/suffixes for loose matching."""
     if not isinstance(name, str):
@@ -218,83 +202,18 @@ def _normalize_name(name):
     return " ".join(name.split())
 
 
-def fetch_pst_injuries(start_date, end_date):
-    """
-    Return a DataFrame of PST injury rows (player going OUT) between two
-    'YYYY-MM-DD' dates. Fetch this ONCE for a whole date range when scaling,
-    then reuse it for every game in that range.
-    """
-    all_rows = []
-    start = 0
-    while True:
-        url = (
-            f"{PST_BASE}?BeginDate={start_date}&EndDate={end_date}"
-            "&ILChkBx=yes&InjuriesChkBx=yes&Submit=Search"
-            f"&start={start}"
-        )
-        try:
-            resp = requests.get(url, headers=DOWNLOAD_HEADERS, timeout=30)
-            resp.raise_for_status()
-        except requests.RequestException as e:
-            # PST periodically blocks automated traffic (e.g. 403 from a
-            # datacenter IP). Don't crash the whole run -- warn and return
-            # whatever we gathered so far. Without PST, candidates simply
-            # can't be confirmed (single-game tool still works with
-            # --include-unconfirmed; the batch tool will find 0 injuries).
-            print(
-                f"  WARNING: Pro Sports Transactions request failed ({e}); "
-                "continuing without injury cross-check.",
-                file=sys.stderr,
-            )
-            break
-        tables = pd.read_html(StringIO(resp.text))
-        if not tables:
-            break
-        # The results live in the widest table on the page.
-        df = max(tables, key=lambda t: t.shape[1])
-        # The first row holds the real column names ("Date", "Relinquished"...).
-        df.columns = [str(c).strip() for c in df.iloc[0]]
-        df = df.iloc[1:].reset_index(drop=True)
-        if df.empty:
-            break
-        all_rows.append(df)
-        if len(df) < 25:          # PST paginates 25 rows at a time
-            break
-        start += 25
-        time.sleep(SLEEP_BETWEEN_CALLS)
-
-    if not all_rows:
-        return pd.DataFrame(
-            columns=["Date", "Team", "Acquired", "Relinquished", "Notes"]
-        )
-    return pd.concat(all_rows, ignore_index=True)
+# Allow an injury to be logged on the game date or up to N days after it.
+INJURY_WINDOW_DAYS = 2
 
 
-def confirm_with_pst(player_name, game_date, pst_df, window_days=PST_WINDOW_DAYS):
-    """
-    Return the matching PST injury note if `player_name` has a Relinquished
-    entry within [game_date, game_date + window_days], else None.
-    `game_date` is a datetime.date.
-    """
-    if pst_df.empty:
-        return None
-    target = _normalize_name(player_name)
-    last_name = target.split()[-1] if target else ""
-
-    for _, row in pst_df.iterrows():
-        rel = _normalize_name(row.get("Relinquished", ""))
-        if not rel:
-            continue
-        # match the full name, or fall back to the last name as a token
-        if target not in rel and last_name not in rel.split():
-            continue
-        try:
-            row_date = datetime.strptime(str(row["Date"]).strip(), "%Y-%m-%d").date()
-        except (ValueError, TypeError):
-            continue
-        if game_date <= row_date <= game_date + timedelta(days=window_days):
-            return str(row.get("Notes", "")).strip() or "(injury logged)"
-    return None
+# ---------------------------------------------------------------------------
+# Injury cross-check
+# ---------------------------------------------------------------------------
+# A "did not return" candidate is matched against a real injury log (Hashtag
+# Basketball's NBA Injury Database; see hashtag_injuries.py) within a small
+# date window. That drops most false positives -- blowout rest, foul-outs,
+# ejections. Caveat: it can also drop a REAL injury the log never recorded,
+# so "unconfirmed" is not proof there was no injury, just no matching entry.
 
 
 def main():
@@ -302,6 +221,10 @@ def main():
         print("usage: python nba_injury_clips.py <game_id> "
               "[--download] [--include-unconfirmed]")
         sys.exit(1)
+
+    # Imported lazily so the cheap helpers above stay importable without a
+    # network round-trip (and to avoid an import cycle with hashtag_injuries).
+    from hashtag_injuries import fetch_injury_database, confirm_injury
 
     game_id = sys.argv[1]
     do_download = "--download" in sys.argv
@@ -315,21 +238,18 @@ def main():
     candidates = find_injury_candidates(pbp)
     print(f"Found {len(candidates)} 'did not return' candidate(s).")
 
-    # Cross-check against PST for the game date + a short window.
-    print("Cross-checking against Pro Sports Transactions...")
-    pst = fetch_pst_injuries(
-        game_date.isoformat(),
-        (game_date + timedelta(days=PST_WINDOW_DAYS)).isoformat(),
-    )
+    # Cross-check against the Hashtag Basketball injury log (cached on disk).
+    print("Cross-checking against the Hashtag Basketball injury log...")
+    injuries = fetch_injury_database()
 
     confirmed = 0
     for c in candidates:
-        note = confirm_with_pst(c["player"], game_date, pst)
+        note = confirm_injury(c["player"], game_date, injuries, INJURY_WINDOW_DAYS)
         c["confirmed"] = note is not None
-        c["pst_note"] = note
+        c["injury_note"] = note
         confirmed += int(c["confirmed"])
 
-    print(f"{confirmed} confirmed by PST, "
+    print(f"\n{confirmed} confirmed, "
           f"{len(candidates) - confirmed} unconfirmed.\n")
 
     for c in candidates:
@@ -339,9 +259,9 @@ def main():
             f"    play: {c['injury_play_desc']}"
         )
         if c["confirmed"]:
-            print(f"    PST: {c['pst_note']}")
+            print(f"    injury: {c['injury_note']}")
 
-        # By default only resolve/download clips for PST-confirmed injuries.
+        # By default only resolve/download clips for confirmed injuries.
         if not c["confirmed"] and not include_unconfirmed:
             print("    (skipped -- pass --include-unconfirmed to fetch anyway)\n")
             continue

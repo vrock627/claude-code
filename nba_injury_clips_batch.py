@@ -3,30 +3,29 @@ nba_injury_clips_batch.py
 =========================
 
 INJURY-LOG-DRIVEN driver. Instead of scanning every game, it starts from the
-Pro Sports Transactions (PST) injury log and only processes the games that
-correspond to a logged injury.
+Hashtag Basketball NBA Injury Database (see hashtag_injuries.py) and only
+processes the games that correspond to a logged injury.
 
 For each logged injury it:
   1. finds the game that player's team played in the injury window,
   2. locates the play where the player exited and didn't return,
-  3. resolves the clip URL for that play,
-  4. estimates time missed by pairing the injury with the player's next
-     "activated/returned" entry in PST.
+  3. resolves the clip URL for that play.
 
 Output spreadsheet columns:
     name | date | injury_desc | severity | play_by_play_url
 
   - date            = the actual game date the injury occurred
-  - injury_desc     = the PST report note
-  - severity        = ESTIMATED TIME MISSED, e.g. "14 days",
-                      "season-ending", or "unknown (no return logged)"
+  - injury_desc     = the injury-type description from the log
+  - severity        = TIME MISSED, taken straight from the log's precomputed
+                      "days missed" (e.g. "14 days"), or
+                      "unknown (no return logged)" when the player is still out
   - play_by_play_url= clip of the injury play (blank if no in-game exit found)
 
-Requires nba_injury_clips.py in the same folder.
+Requires nba_injury_clips.py and hashtag_injuries.py in the same folder.
 
 SETUP
 -----
-    pip install nba_api requests pandas openpyxl
+    pip install nba_api requests pandas openpyxl lxml
 
 USAGE
 -----
@@ -36,9 +35,10 @@ USAGE
     python nba_injury_clips_batch.py              # all three seasons
     python nba_injury_clips_batch.py --finalize   # merge checkpoint -> .xlsx
 
-This is far lighter than scanning all games, but still hits an unofficial API,
-so it sleeps between calls and checkpoints every injury. If it stops or you get
-blocked, just re-run -- it resumes. Running one season at a time is safest.
+The injury log is scraped once and cached on disk (.hashtag_cache/), so the
+first run is slower. nba_api still hits an unofficial endpoint, so this sleeps
+between calls and checkpoints every injury. If it stops or you get blocked,
+just re-run -- it resumes.
 """
 
 import sys
@@ -55,11 +55,11 @@ from nba_injury_clips import (
     get_play_by_play,
     find_injury_candidates,
     extract_clip_url,
-    fetch_pst_injuries,
     _normalize_name,
     SLEEP_BETWEEN_CALLS,
-    PST_WINDOW_DAYS,
+    INJURY_WINDOW_DAYS,
 )
+from hashtag_injuries import fetch_injury_database, format_severity
 
 SEASONS = ["2023-24", "2024-25", "2025-26"]
 SEASON_TYPES = ["Regular Season", "Playoffs"]
@@ -69,47 +69,6 @@ PROGRESS_FILE = "processed_injuries.txt"
 OUTPUT_XLSX = "nba_injuries_2023_2026.xlsx"
 
 COLUMNS = ["name", "date", "injury_desc", "severity", "play_by_play_url"]
-
-
-# ---------------------------------------------------------------------------
-# severity = estimated time missed
-# Pair the injury (relinquished) with the player's next return (acquired) in
-# PST and report the day gap. Falls back to the note ("out for season") or
-# "unknown" when no return is logged in the fetched range.
-# ---------------------------------------------------------------------------
-def estimate_time_missed(player_norm, injury_date, returns_by_player, notes):
-    if "season" in (notes or "").lower():
-        return "season-ending"
-    future = [d for d in returns_by_player.get(player_norm, []) if d > injury_date]
-    if future:
-        return f"{(min(future) - injury_date).days} days"
-    return "unknown (no return logged)"
-
-
-def parse_pst_events(pst_df):
-    """Split PST rows into injuries (relinquished) and returns (acquired)."""
-    injuries = []
-    returns_by_player = defaultdict(list)
-    for _, row in pst_df.iterrows():
-        try:
-            d = datetime.strptime(str(row["Date"]).strip(), "%Y-%m-%d").date()
-        except (ValueError, TypeError, KeyError):
-            continue
-        rel = str(row.get("Relinquished", "")).strip()
-        acq = str(row.get("Acquired", "")).strip()
-        if rel and rel.lower() != "nan":
-            injuries.append({
-                "player_raw": rel.replace("•", "").replace("•", "").strip(),
-                "player_norm": _normalize_name(rel),
-                "team_raw": str(row.get("Team", "")).strip(),
-                "date": d,
-                "notes": str(row.get("Notes", "")).strip(),
-            })
-        if acq and acq.lower() != "nan":
-            returns_by_player[_normalize_name(acq)].append(d)
-    for k in returns_by_player:
-        returns_by_player[k].sort()
-    return injuries, returns_by_player
 
 
 # ---------------------------------------------------------------------------
@@ -133,25 +92,24 @@ def build_schedule(season):
     return team_games
 
 
-def match_team(pst_team, team_games):
-    """PST uses nicknames ('Lakers'); match into full TEAM_NAME."""
-    pst = pst_team.lower().strip()
-    if not pst:
+def match_team(team_nickname, team_games):
+    """The log uses nicknames ('Lakers'); match into full TEAM_NAME."""
+    nick = (team_nickname or "").lower().strip()
+    if not nick:
         return None
     for name in team_games:
-        if pst in name.lower():
+        if nick in name.lower():
             return name
     return None
 
 
-def find_injury_game(injury, team_games):
+def find_injury_game(team_nickname, injury_date, team_games):
     """The team's game on/just before the log date -> (date, game_id)."""
-    name = match_team(injury["team_raw"], team_games)
+    name = match_team(team_nickname, team_games)
     if not name:
         return None
-    lo = injury["date"] - timedelta(days=PST_WINDOW_DAYS)
-    hi = injury["date"]
-    games = [(d, g) for (d, g) in team_games[name] if lo <= d <= hi]
+    lo = injury_date - timedelta(days=INJURY_WINDOW_DAYS)
+    games = [(d, g) for (d, g) in team_games[name] if lo <= d <= injury_date]
     if not games:
         return None
     games.sort()
@@ -168,14 +126,13 @@ def names_match(a_norm, b_norm):
 # ---------------------------------------------------------------------------
 # Process one logged injury
 # ---------------------------------------------------------------------------
-def process_injury(injury, team_games, returns_by_player, pbp_cache):
-    severity = estimate_time_missed(
-        injury["player_norm"], injury["date"], returns_by_player, injury["notes"]
-    )
+def process_injury(injury, team_games, pbp_cache):
+    """`injury` is a row (dict-like) from the Hashtag Basketball injury log."""
+    severity = format_severity(injury["days_missed"], injury["returned"])
     url = ""
     used_date = injury["date"]
 
-    match = find_injury_game(injury, team_games)
+    match = find_injury_game(injury["team"], injury["date"], team_games)
     if match:
         gdate, gid = match
         used_date = gdate
@@ -190,9 +147,9 @@ def process_injury(injury, team_games, returns_by_player, pbp_cache):
                 break
 
     return {
-        "name": injury["player_raw"],
+        "name": injury["player"],
         "date": used_date.isoformat(),
-        "injury_desc": injury["notes"],
+        "injury_desc": injury["injury_desc"],
         "severity": severity,
         "play_by_play_url": url,
     }
@@ -278,33 +235,39 @@ def main():
     seasons = [args[args.index("--season") + 1]] if "--season" in args else SEASONS
     processed = load_processed()
 
+    print("Fetching the Hashtag Basketball injury log (cached on disk) ...")
+    injuries = fetch_injury_database()
+
     for season in seasons:
         print(f"\n=== Season {season} ===")
         team_games = build_schedule(season)
         all_dates = [d for games in team_games.values() for (d, _) in games]
-        start = min(all_dates).isoformat()
-        end = (max(all_dates) + timedelta(days=PST_WINDOW_DAYS)).isoformat()
+        if not all_dates:
+            print("  no games found for this season; skipping.")
+            continue
+        lo, hi = min(all_dates), max(all_dates) + timedelta(days=INJURY_WINDOW_DAYS)
 
-        print(f"Fetching PST injuries {start} -> {end} ...")
-        pst_df = fetch_pst_injuries(start, end)
-        injuries, returns_by_player = parse_pst_events(pst_df)
-        print(f"{len(injuries)} logged injuries to map.")
+        season_injuries = injuries[
+            injuries["date"].apply(lambda d: d is not None and lo <= d <= hi)
+        ].reset_index(drop=True)
+        print(f"{len(season_injuries)} logged injuries in {lo} .. {hi}.")
 
         pbp_cache = {}
-        for i, inj in enumerate(injuries, 1):
-            key = f"{inj['player_norm']}|{inj['date']}"
+        total = len(season_injuries)
+        for i, inj in enumerate(season_injuries.to_dict("records"), 1):
+            key = f"{inj['player_norm']}|{inj['date'].isoformat()}|{inj['injury_desc']}"
             if key in processed:
                 continue
             try:
-                row = process_injury(inj, team_games, returns_by_player, pbp_cache)
+                row = process_injury(inj, team_games, pbp_cache)
                 append_rows([row])
                 mark_processed(key)
                 processed.add(key)
                 tag = "clip" if row["play_by_play_url"] else "no clip"
-                print(f"  [{i}/{len(injuries)}] {row['name']} {row['date']} "
+                print(f"  [{i}/{total}] {row['name']} {row['date']} "
                       f"| {row['severity']} | {tag}")
             except Exception as e:  # noqa: BLE001 - keep the run alive
-                print(f"  [{i}/{len(injuries)}] {inj['player_raw']} FAILED: {e}")
+                print(f"  [{i}/{total}] {inj['player']} FAILED: {e}")
             time.sleep(SLEEP_BETWEEN_CALLS)
 
     finalize()
