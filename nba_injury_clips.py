@@ -86,7 +86,7 @@ def get_game_date(game_id):
 def get_play_by_play(game_id):
     """Return the full play-by-play as a sorted DataFrame."""
     try:
-        pbp = playbyplayv2.PlayByPlayV2(game_id=game_id).get_data_frame()
+        pbp = playbyplayv2.PlayByPlayV2(game_id=game_id).get_data_frames()[0]
     except KeyError as e:
         # nba_api raises a bare KeyError('resultSet') when stats.nba.com
         # returns an empty/blocked body (rate-limited or datacenter IP

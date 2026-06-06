@@ -79,7 +79,7 @@ def build_schedule(season):
     for stype in SEASON_TYPES:
         log = leaguegamelog.LeagueGameLog(
             season=season, season_type_all_star=stype
-        ).get_data_frame()
+        ).get_data_frames()[0]
         for _, r in log.iterrows():
             try:
                 d = datetime.strptime(str(r["GAME_DATE"])[:10], "%Y-%m-%d").date()
@@ -136,15 +136,26 @@ def process_injury(injury, team_games, pbp_cache):
     if match:
         gdate, gid = match
         used_date = gdate
+        # Clip resolution is best-effort: if play-by-play / video can't be
+        # fetched (e.g. stats.nba.com is soft-blocking this IP), still record
+        # the injury -- just leave the clip URL blank instead of dropping it.
         if gid not in pbp_cache:
-            pbp_cache[gid] = get_play_by_play(gid)
+            try:
+                pbp_cache[gid] = get_play_by_play(gid)
+            except Exception:  # noqa: BLE001
+                pbp_cache[gid] = None
             time.sleep(SLEEP_BETWEEN_CALLS)
-        for c in find_injury_candidates(pbp_cache[gid]):
-            if names_match(_normalize_name(c["player"]), injury["player_norm"]):
-                ymd = (gdate.year, gdate.month, gdate.day)
-                time.sleep(SLEEP_BETWEEN_CALLS)
-                url = extract_clip_url(gid, c["injury_play_eventnum"], ymd) or ""
-                break
+        pbp = pbp_cache[gid]
+        if pbp is not None:
+            for c in find_injury_candidates(pbp):
+                if names_match(_normalize_name(c["player"]), injury["player_norm"]):
+                    ymd = (gdate.year, gdate.month, gdate.day)
+                    time.sleep(SLEEP_BETWEEN_CALLS)
+                    try:
+                        url = extract_clip_url(gid, c["injury_play_eventnum"], ymd) or ""
+                    except Exception:  # noqa: BLE001
+                        url = ""
+                    break
 
     return {
         "name": injury["player"],
