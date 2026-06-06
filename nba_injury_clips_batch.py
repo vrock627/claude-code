@@ -126,7 +126,13 @@ def names_match(a_norm, b_norm):
 # ---------------------------------------------------------------------------
 # Process one logged injury
 # ---------------------------------------------------------------------------
-def process_injury(injury, team_games, pbp_cache):
+# How many consecutive play-by-play failures before we conclude the endpoint
+# is unavailable from here (e.g. stats.nba.com soft-blocking this IP) and stop
+# hitting it -- the rest of the run still records injuries, just without clips.
+PBP_FAIL_LIMIT = 8
+
+
+def process_injury(injury, team_games, pbp_cache, pbp_state):
     """`injury` is a row (dict-like) from the Hashtag Basketball injury log."""
     severity = format_severity(injury["days_missed"], injury["returned"])
     url = ""
@@ -139,13 +145,20 @@ def process_injury(injury, team_games, pbp_cache):
         # Clip resolution is best-effort: if play-by-play / video can't be
         # fetched (e.g. stats.nba.com is soft-blocking this IP), still record
         # the injury -- just leave the clip URL blank instead of dropping it.
-        if gid not in pbp_cache:
+        if gid not in pbp_cache and not pbp_state["disabled"]:
             try:
                 pbp_cache[gid] = get_play_by_play(gid)
+                pbp_state["fails"] = 0
             except Exception:  # noqa: BLE001
                 pbp_cache[gid] = None
+                pbp_state["fails"] += 1
+                if pbp_state["fails"] >= PBP_FAIL_LIMIT:
+                    pbp_state["disabled"] = True
+                    print(f"  NOTE: play-by-play unavailable after "
+                          f"{PBP_FAIL_LIMIT} failures (stats.nba.com is likely "
+                          f"blocking this IP); recording injuries without clips.")
             time.sleep(SLEEP_BETWEEN_CALLS)
-        pbp = pbp_cache[gid]
+        pbp = pbp_cache.get(gid)
         if pbp is not None:
             for c in find_injury_candidates(pbp):
                 if names_match(_normalize_name(c["player"]), injury["player_norm"]):
@@ -264,13 +277,14 @@ def main():
         print(f"{len(season_injuries)} logged injuries in {lo} .. {hi}.")
 
         pbp_cache = {}
+        pbp_state = {"fails": 0, "disabled": False}
         total = len(season_injuries)
         for i, inj in enumerate(season_injuries.to_dict("records"), 1):
             key = f"{inj['player_norm']}|{inj['date'].isoformat()}|{inj['injury_desc']}"
             if key in processed:
                 continue
             try:
-                row = process_injury(inj, team_games, pbp_cache)
+                row = process_injury(inj, team_games, pbp_cache, pbp_state)
                 append_rows([row])
                 mark_processed(key)
                 processed.add(key)
@@ -279,7 +293,10 @@ def main():
                       f"| {row['severity']} | {tag}")
             except Exception as e:  # noqa: BLE001 - keep the run alive
                 print(f"  [{i}/{total}] {inj['player']} FAILED: {e}")
-            time.sleep(SLEEP_BETWEEN_CALLS)
+            # Once clip lookups are disabled no nba_api calls happen per
+            # injury, so there's nothing to be polite about -- skip the sleep.
+            if not pbp_state["disabled"]:
+                time.sleep(SLEEP_BETWEEN_CALLS)
 
     finalize()
 
