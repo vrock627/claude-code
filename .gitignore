@@ -6,6 +6,7 @@ nba_injuries_2023_2026.csv
 nba_injuries_2023_2026.xlsx
 processed_injuries.txt
 .hashtag_cache/
+batch_run.log
 *.mp4
 
 __pycache__/
