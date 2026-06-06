@@ -85,7 +85,16 @@ def get_game_date(game_id):
 
 def get_play_by_play(game_id):
     """Return the full play-by-play as a sorted DataFrame."""
-    pbp = playbyplayv2.PlayByPlayV2(game_id=game_id).get_data_frame()
+    try:
+        pbp = playbyplayv2.PlayByPlayV2(game_id=game_id).get_data_frame()
+    except KeyError as e:
+        # nba_api raises a bare KeyError('resultSet') when stats.nba.com
+        # returns an empty/blocked body (rate-limited or datacenter IP
+        # blocked). Surface something actionable instead.
+        raise RuntimeError(
+            f"play-by-play for {game_id} came back empty/blocked "
+            f"(stats.nba.com may be rate-limiting this IP): {e!r}"
+        ) from e
     return pbp.sort_values("EVENTNUM").reset_index(drop=True)
 
 
@@ -121,12 +130,15 @@ def find_injury_candidates(pbp):
         # The injury play = the event immediately before the sub-out.
         sub_idx = pbp.index[pbp["EVENTNUM"] == last_eventnum][0]
         injury_row = pbp.loc[max(sub_idx - 1, 0)]
-        desc = (
-            injury_row["HOMEDESCRIPTION"]
-            or injury_row["VISITORDESCRIPTION"]
-            or injury_row["NEUTRALDESCRIPTION"]
-            or "(no description)"
-        )
+        # NOTE: missing descriptions come back as NaN, and float('nan') is
+        # truthy, so a plain `a or b` chain would return the NaN. Pick the
+        # first description that is an actual non-empty string instead.
+        desc = "(no description)"
+        for col in ("HOMEDESCRIPTION", "VISITORDESCRIPTION", "NEUTRALDESCRIPTION"):
+            val = injury_row[col]
+            if isinstance(val, str) and val.strip():
+                desc = val
+                break
 
         candidates.append({
             "player": last_row["PLAYER1_NAME"],
@@ -220,8 +232,21 @@ def fetch_pst_injuries(start_date, end_date):
             "&ILChkBx=yes&InjuriesChkBx=yes&Submit=Search"
             f"&start={start}"
         )
-        resp = requests.get(url, headers=DOWNLOAD_HEADERS, timeout=30)
-        resp.raise_for_status()
+        try:
+            resp = requests.get(url, headers=DOWNLOAD_HEADERS, timeout=30)
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            # PST periodically blocks automated traffic (e.g. 403 from a
+            # datacenter IP). Don't crash the whole run -- warn and return
+            # whatever we gathered so far. Without PST, candidates simply
+            # can't be confirmed (single-game tool still works with
+            # --include-unconfirmed; the batch tool will find 0 injuries).
+            print(
+                f"  WARNING: Pro Sports Transactions request failed ({e}); "
+                "continuing without injury cross-check.",
+                file=sys.stderr,
+            )
+            break
         tables = pd.read_html(StringIO(resp.text))
         if not tables:
             break
