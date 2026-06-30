@@ -3,7 +3,9 @@
 > Working title: **Black Tide** (also considered: *Salt & Powder*, *Letters of Marque*, *Hoist the Black*).
 > A pirate-themed sea-battle roguelike, heavily inspired by **FTL: Faster Than Light**.
 
-**Status:** Design document. No code exists yet — this document is the blueprint we build from.
+**Status:** Design document + a **playable vertical slice** now lives alongside it
+(`index.html`, `data.js`, `game.js`, `_smoke.js` — see [`README.md`](./README.md) to run it).
+This document remains the full blueprint; the slice implements §13.
 
 ---
 
@@ -500,10 +502,10 @@ push, and the world pushes back proportionally.
 
 ---
 
-## 13. First playable milestone (the vertical slice to build first)
+## 13. First playable milestone (the vertical slice) — **IMPLEMENTED**
 
-When we move from doc to code, target a **thin but complete end-to-end loop** that proves the core
-fantasy, then expand:
+This slice is now built (see `README.md`). It is a **thin but complete end-to-end loop** that
+proves the core fantasy, ready to expand:
 
 1. **Captain & ship creation** — pick a starting captain (trait loadout) and the **sloop**.
 2. **Small open-sea map** — a handful of nodes: open water, one **port**, one roaming enemy.
