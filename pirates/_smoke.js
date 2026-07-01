@@ -129,12 +129,55 @@ for (const k of Object.keys(D.QUESTS)) {
 }
 for (const id of D.PORT_QUESTS) check(D.QUESTS[id], `PORT_QUESTS references unknown quest ${id}`);
 
+// --- RANKS (skill tiers) ---
+check(Array.isArray(D.RANKS) && D.RANKS.length >= 2, "need at least 2 ranks");
+check(D.RANKS[0].min === 0, "lowest rank must start at 0");
+for (let i = 1; i < D.RANKS.length; i++) check(D.RANKS[i].min > D.RANKS[i - 1].min, "ranks must be in ascending order");
+for (const rk of D.RANKS) check(rk.label && rk.tag, "rank missing label/tag");
+// rankOf mirror: value → highest rank whose min it meets.
+function rankOf(v) { let r = D.RANKS[0]; for (const rk of D.RANKS) if (v >= rk.min) r = rk; return r; }
+check(rankOf(0) === D.RANKS[0], "rankOf(0) must be the lowest rank");
+check(rankOf(D.TUNING.skillMax) === D.RANKS[D.RANKS.length - 1], "rankOf(skillMax) must be the top rank");
+
+// --- OFFICER_ROLES ---
+const TRAIT_KEYS = new Set(Object.keys(D.TRAITS));
+for (const k of Object.keys(D.OFFICER_ROLES)) {
+  const o = D.OFFICER_ROLES[k];
+  check(o.key === k && o.label && o.blurb, `officer ${k}: missing meta`);
+  check(TRAIT_KEYS.has(o.trait), `officer ${k}: matching trait ${o.trait} unknown`);
+  // has at least one numeric effect field beyond key/label/trait/blurb
+  const fx = Object.keys(o).filter((f) => !["key", "label", "trait", "blurb"].includes(f) && typeof o[f] === "number");
+  check(fx.length >= 1, `officer ${k}: needs at least one numeric effect`);
+}
+
+// --- crew-depth math sanity ---
+const Tu = D.TUNING;
+// gainSkill caps at skillMax and increases
+const gain = (v, amt) => Math.min(Tu.skillMax, v + amt);
+check(gain(0, 0.5) === 0.5, "gainSkill should increase skill");
+check(gain(Tu.skillMax, 1) === Tu.skillMax, "gainSkill must cap at skillMax");
+// healing is positive and helped by medicine
+const heal = (med, mult) => (Tu.healBase + med * Tu.healPerMedicine) * mult;
+check(heal(0, 1) > 0, "wounded must heal even with no medic");
+check(heal(5, 1) > heal(0, 1), "medicine must speed healing");
+// morale bounds + mutiny threshold sane
+check(Tu.startMorale > 0 && Tu.startMorale <= Tu.moraleMax, "startMorale within (0, moraleMax]");
+check(Tu.mutinyThreshold > 0 && Tu.mutinyThreshold < Tu.startMorale, "mutiny threshold below starting morale");
+check(Tu.mutinyChancePerPoint > 0 && Tu.mutinyChancePerPoint < 1, "mutiny chance per point in (0,1)");
+// drunkard flavour used by the rum ration
+check(D.TRAITS.drunkard && D.TRAITS.drunkard.rumLove, "drunkard should love a rum ration");
+
 // --- TUNING presence ---
 const TUNE_KEYS = ["startGold", "startSupplies", "startCrew", "supplyPerLeg", "arenaW", "arenaH",
   "windMinFactor", "windMaxFactor", "accel", "drag", "reloadBase", "gunArcDeg", "accuracyBase",
   "accuracyRangeFalloff", "accuracyMotionPenalty", "areaMax", "floodGain", "pumpRate", "floodSink",
   "grappleRange", "boardTickSec", "boardLethality", "meleeBase", "enemyHullSurrender", "enemyCrewSurrender", "sinkGoldMult",
-  "gunnerReloadK", "gunnerAccK", "gunneryXpPerFire", "skillMax", "eventChance", "repPriceSwing"];
+  "gunnerReloadK", "gunnerAccK", "gunneryXpPerFire", "skillMax", "eventChance", "repPriceSwing",
+  "xpSailPerSec", "xpRepairPerSec", "xpMeleePerBoardTick", "xpMedicinePerHeal", "xpNavPerLeg", "xpRepairPerPortFix",
+  "woundGrape", "woundBoardScale", "healBase", "healPerMedicine", "infirmaryCostPerHp",
+  "startMorale", "moraleMax", "moraleWin", "moraleCapture", "moraleTreasure", "moraleLoss", "moraleLostHand",
+  "moraleStarve", "moraleOverwork", "overworkGraceLegs", "rumRationSupplies", "rumRationMorale",
+  "sharePerCrew", "shareMorale", "loyaltyStart", "mutinyThreshold", "mutinyChancePerPoint"];
 for (const k of TUNE_KEYS) check(typeof D.TUNING[k] === "number", `TUNING.${k} missing/not a number`);
 const T = D.TUNING;
 check(T.windMinFactor < T.windMaxFactor, "windMinFactor must be < windMaxFactor");
@@ -189,4 +232,6 @@ console.log("Black Tide smoke OK — " +
   Object.keys(D.ENEMIES).length + " enemies, " +
   Object.keys(D.FACTIONS).length + " factions, " +
   Object.keys(D.EVENTS).length + " events, " +
-  Object.keys(D.QUESTS).length + " quests; all TUNING + battle-math + event/quest invariants hold.");
+  Object.keys(D.QUESTS).length + " quests, " +
+  Object.keys(D.OFFICER_ROLES).length + " officer roles, " +
+  D.RANKS.length + " ranks; all TUNING + battle/crew/event/quest invariants hold.");

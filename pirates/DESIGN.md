@@ -10,7 +10,10 @@ This document remains the full blueprint. Implemented so far: the §13 vertical 
 accuracy; firing is a player order — no auto-fire), and an **events + multi-stage quests +
 faction/reputation** layer (branching sea events; bounty/delivery/treasure contracts from
 port rumour boards; standing with the Navy, Merchant Guild, and Pirate Brethren that colours
-prices and offers).
+prices and offers), and a **deep crew** layer (every skill levels into ranks Green→Master;
+persistent wounds that heal over voyages, with permadeath; ship morale, per-hand loyalty, and
+mutiny; promotable officer roles granting ship-wide bonuses; and a port crew-management
+screen).
 
 ---
 

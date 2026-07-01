@@ -123,16 +123,86 @@
     for (const k in mods) skills[k] = Math.max(0, (skills[k] || 0) + mods[k]);
     let name = choice(D.FIRST_NAMES);
     if (Math.random() < 0.5) name += " " + choice(D.NICKNAMES);
-    return { name, trait: traitKey, skills, hp: 100, weapon: opts.weapon || "fists" };
+    const loy = T.loyaltyStart + (D.TRAITS[traitKey].loy || 0) + randInt(-6, 6);
+    return { name, trait: traitKey, skills, hp: 100, weapon: opts.weapon || "fists", loyalty: clamp(loy, 0, 100), role: null };
+  }
+  // Skill value → rank ({label, tag}); skills grow through use up to skillMax.
+  function rankOf(v) {
+    let r = D.RANKS[0];
+    for (const rk of D.RANKS) if (v >= rk.min) r = rk;
+    return r;
+  }
+  function gainSkill(c, key, amt) {
+    if (!c) return;
+    c.skills[key] = Math.min(T.skillMax, (c.skills[key] || 0) + amt);
   }
   function freshAreas() {
     const a = {};
     for (const ar of D.AREAS) a[ar.key] = T.areaMax;
     return a;
   }
+  // Melee power now scales with the hand's health — wounded crew fight worse.
   const meleePower = (c) =>
-    T.meleeBase + (c.skills.melee || 0) + (D.WEAPONS[c.weapon] ? D.WEAPONS[c.weapon].melee : 0);
+    (T.meleeBase + (c.skills.melee || 0) + (D.WEAPONS[c.weapon] ? D.WEAPONS[c.weapon].melee : 0))
+    * (0.4 + 0.6 * clamp((c.hp == null ? 100 : c.hp) / 100, 0, 1));
   const avgSkill = (crew, k) => crew.length ? crew.reduce((s, c) => s + (c.skills[k] || 0), 0) / crew.length : 0;
+
+  // --- Officers: one holder per role; full effect with the matching trait ---
+  function officerHolder(roleKey) { return state.run ? state.run.crew.find((c) => c.role === roleKey) || null : null; }
+  function officerFactor(roleKey) {
+    const h = officerHolder(roleKey); if (!h) return 0;
+    return h.trait === D.OFFICER_ROLES[roleKey].trait ? 1 : 0.6;
+  }
+  // Multiplicative field (e.g. reloadMult 0.9): blends from 1 → role value by factor.
+  function officerMult(roleKey, field) {
+    const role = D.OFFICER_ROLES[roleKey]; if (role[field] == null) return 1;
+    return 1 + (role[field] - 1) * officerFactor(roleKey);
+  }
+  // Additive field (e.g. accBonus, boardBonus, supplyPerLeg): value × factor.
+  function officerAdd(roleKey, field) {
+    const role = D.OFFICER_ROLES[roleKey]; if (role[field] == null) return 0;
+    return role[field] * officerFactor(roleKey);
+  }
+
+  // --- Morale ---
+  function changeMorale(amt) {
+    if (!state.run) return;
+    // Officer (Quartermaster) softens morale losses.
+    if (amt < 0) amt *= officerMult("quartermaster", "moraleDecayMult");
+    state.run.morale = clamp(state.run.morale + amt, 0, T.moraleMax);
+  }
+  const moraleLabel = (m) => m >= 80 ? "high" : m >= 55 ? "steady" : m >= 35 ? "uneasy" : m >= 20 ? "low" : "mutinous";
+  const moraleColor = (m) => m >= 55 ? C.green : m >= 35 ? C.gold : C.danger;
+  const woundedCount = () => state.run ? state.run.crew.filter((c) => (c.hp == null ? 100 : c.hp) < 100).length : 0;
+
+  // --- Wounds & death ---
+  function killCrewMember(c) {
+    const i = state.run.crew.indexOf(c);
+    if (i >= 0) state.run.crew.splice(i, 1);
+    if (state.battle) { unassign(c); if (state.battle.sel === c) state.battle.sel = null; }
+  }
+  // Spread `amount` hp of harm across random hands; a hand at 0 hp dies.
+  function woundRandomCrew(amount) {
+    let guard = 0;
+    while (amount > 0 && state.run.crew.length > 0 && guard++ < 200) {
+      const c = choice(state.run.crew);
+      if (c.hp == null) c.hp = 100;
+      const d = Math.min(amount, c.hp);
+      c.hp -= d; amount -= d;
+      if (c.hp <= 0) { changeMorale(-T.moraleLostHand); killCrewMember(c); }
+    }
+  }
+  // Heal wounded hands between fights (called per map leg). The best medicine
+  // aboard (Surgeon / Ship's Doctor) speeds it; the healer trains medicine.
+  function healCrewOverLeg() {
+    const wounded = state.run.crew.filter((c) => (c.hp == null ? 100 : c.hp) < 100);
+    if (!wounded.length) return;
+    let healer = null, best = -1;
+    for (const c of state.run.crew) { const m = c.skills.medicine || 0; if (m > best) { best = m; healer = c; } }
+    let heal = (T.healBase + best * T.healPerMedicine) * officerMult("ships_doctor", "healMult");
+    for (const c of wounded) { if (c.hp == null) c.hp = 100; c.hp = clamp(c.hp + heal, 0, 100); }
+    if (healer) gainSkill(healer, "medicine", T.xpMedicinePerHeal);
+  }
 
   // ---------------------------------------------------------------------------
   // Game state, new game, save/load
@@ -158,6 +228,8 @@
       quests: [],        // active quest ids
       questsDone: [],    // completed quest ids
       flags: {},         // misc story flags
+      morale: T.startMorale,
+      legsSincePort: 0,  // for overwork drift
     };
     state = { screen: "map", run, map: makeMap(), battle: null, msg: null, flash: 0 };
     save();
@@ -175,7 +247,16 @@
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return false;
       const d = JSON.parse(raw);
-      state = { screen: "map", run: d.run, map: d.map, battle: null, msg: null, flash: 0 };
+      // Backfill crew-depth fields for saves made before iteration 3.
+      const run = d.run;
+      if (run.morale == null) run.morale = T.startMorale;
+      if (run.legsSincePort == null) run.legsSincePort = 0;
+      for (const c of run.crew || []) {
+        if (c.hp == null) c.hp = 100;
+        if (c.loyalty == null) c.loyalty = T.loyaltyStart;
+        if (c.role === undefined) c.role = null;
+      }
+      state = { screen: "map", run, map: d.map, battle: null, msg: null, flash: 0 };
       return true;
     } catch (e) { return false; }
   }
@@ -272,6 +353,7 @@
     const rw = q.reward || {};
     if (rw.gold) state.run.gold += rw.gold;
     for (const f in (rw.rep || {})) repChange(f, rw.rep[f]);
+    changeMorale(q.type === "treasure" ? T.moraleTreasure : 6);   // a paid contract cheers the crew
     if (q.targetNode != null) { const n = nodeById(q.targetNode); if (n) delete n.quest; }
     save();
     return { title: "Quest complete: " + q.title, lines: (extraLines || []).concat(["Reward: " + (rw.gold || 0) + " gold."]) };
@@ -315,19 +397,31 @@
     if (!from.links.includes(id)) return;
     // Sailing a leg: burn supplies, decay notoriety, advance world.
     state.run.legs++;
+    state.run.legsSincePort++;
     state.run.notoriety = Math.max(0, state.run.notoriety - T.notorietyDecayPerLeg);
+    // Supplies (a Navigator stretches them); running dry starves a hand + morale.
+    const burn = Math.max(1, T.supplyPerLeg + officerAdd("navigator", "supplyPerLeg"));
     if (state.run.supplies > 0) {
-      state.run.supplies = Math.max(0, state.run.supplies - T.supplyPerLeg);
-    } else if (state.run.crew.length > 1) {
-      // Starvation: lose a hand.
-      state.run.crew.pop();
-      state.flash = 2;
+      state.run.supplies = Math.max(0, state.run.supplies - burn);
+    } else {
+      changeMorale(-T.moraleStarve);
+      if (state.run.crew.length > 1) { changeMorale(-T.moraleLostHand); killCrewMember(choice(state.run.crew)); state.flash = 2; }
     }
+    // Overwork drift once you've been at sea too long without shore leave.
+    if (state.run.legsSincePort > T.overworkGraceLegs) changeMorale(-T.moraleOverwork);
+    // Wounded mend between fights; the whole crew learns the sea.
+    healCrewOverLeg();
+    for (const c of state.run.crew) gainSkill(c, "navigation", T.xpNavPerLeg * (officerFactor("navigator") ? 1.5 : 1));
     state.map.current = id;
     if (!state.map.revealed.includes(id)) state.map.revealed.push(id);
     const n = nodeById(id);
     for (const l of n.links) if (!state.map.revealed.includes(l)) state.map.revealed.push(l);
     save();
+    // A restless crew may rise up before the destination even matters.
+    if (state.run.morale < T.mutinyThreshold &&
+        Math.random() < (T.mutinyThreshold - state.run.morale) * T.mutinyChancePerPoint) {
+      openEvent(mutinyEvent()); return;
+    }
     // Delivery quests complete on arrival at their destination port.
     const arrived = checkArrivalQuests(n);
     // Resolve the destination encounter.
@@ -470,16 +564,14 @@
     const crew = b.stationCrew[key] || [];
     const skillKey = key === "pumps" ? "repair" : "sailing";
     const avgSk = crew.length ? crew.reduce((s, c) => s + (c.skills[skillKey] || 0), 0) / crew.length : 0;
-    return clamp(crew.length / ideal, 0, 1.5) * (1 + 0.05 * avgSk);
-  }
-  // Remove one hand (a casualty) and clear any post they held.
-  function killCrew() {
-    const c = state.run.crew.pop();
-    if (!c) return;
-    if (state.battle) { unassign(c); if (state.battle.sel === c) state.battle.sel = null; }
+    let eff = clamp(crew.length / ideal, 0, 1.5) * (1 + 0.05 * avgSk);
+    if (key === "sails" || key === "helm") eff *= officerMult("boatswain", "sailMult");   // Boatswain drives the rigging
+    return eff;
   }
   function applyCasualty(defender) {
-    if (defender.isPlayer) killCrew();
+    // For the player a "casualty" is now a wound spread across the crew (a hand
+    // only dies if their hp runs out); the enemy is still tracked as a count.
+    if (defender.isPlayer) woundRandomCrew(T.woundGrape);
     else defender.crew = Math.max(0, defender.crew - 1);
   }
 
@@ -504,6 +596,7 @@
     let mult = 1;
     if (isPlayer && state.run.captain && D.CAPTAIN_TRAITS[state.run.captain].perk.reloadMult)
       mult = D.CAPTAIN_TRAITS[state.run.captain].perk.reloadMult;
+    if (isPlayer) mult *= officerMult("master_gunner", "reloadMult");   // Master Gunner speeds the deck
     return (T.reloadBase * mult) / (0.6 + T.gunnerReloadK * cannonSkill(cn));
   }
   // A manned, online cannon loads over its own reload time; unmanned or
@@ -540,6 +633,7 @@
       if (!bears || !inRange) continue;   // fired, but no arc/range → all miss
       let acc = T.accuracyBase * (1 - rangeFrac * T.accuracyRangeFalloff)
         * (1 - motionFrac * T.accuracyMotionPenalty) * (1 + T.gunnerAccK * cannonSkill(cn));
+      if (attacker.isPlayer) acc += officerAdd("master_gunner", "accBonus");
       if (Math.random() < clamp(acc, 0.05, 0.96)) hits++;
     }
     if (fired === 0) return 0;
@@ -598,6 +692,11 @@
 
     // Player pumps fight flooding.
     updateFlooding(p, postEff("pumps") * T.pumpRate, dt);
+
+    // Crew train the skill of the post they're working (gunnery trains on fire).
+    for (const c of b.stationCrew.sails) gainSkill(c, "sailing", T.xpSailPerSec * dt);
+    for (const c of b.stationCrew.helm) gainSkill(c, "sailing", T.xpSailPerSec * dt);
+    if (p.water > 1) for (const c of b.stationCrew.pumps) gainSkill(c, "repair", T.xpRepairPerSec * dt);
 
     // Player cannons load on their own; firing happens only on the player's
     // order (F key / FIRE buttons) — never automatically.
@@ -678,7 +777,8 @@
     let meleeMult = 1;
     if (state.run.captain && D.CAPTAIN_TRAITS[state.run.captain].perk.meleeMult)
       meleeMult = D.CAPTAIN_TRAITS[state.run.captain].perk.meleeMult;
-    const pStr = state.run.crew.reduce((s, c) => s + meleePower(c), 0) * meleeMult;
+    const pStr = state.run.crew.reduce((s, c) => s + meleePower(c), 0)
+      * meleeMult * (1 + officerAdd("quartermaster", "boardBonus"));   // Quartermaster leads the charge
     const eStr = b.enemy.crew * (T.meleeBase + b.enemy.gunnery) * (b.enemy.surrendered ? 0.4 : 1);
     b.boarding = {
       pStr, eStr, pCrew: crewAlive(), eCrew: b.enemy.crew,
@@ -699,9 +799,11 @@
     const adv = bd.pStr / Math.max(1, bd.eStr);   // > 1 means you're winning
     const eLoss = T.boardLethality * bd.pStr * adv;
     const pLoss = T.boardLethality * bd.eStr / adv;
-    bd.eCasualty += eLoss; bd.pCasualty += pLoss;
+    bd.eCasualty += eLoss;
     while (bd.eCasualty >= 1 && b.enemy.crew > 0) { b.enemy.crew--; bd.eCasualty -= 1; }
-    while (bd.pCasualty >= 1 && state.run.crew.length > 0) { killCrew(); bd.pCasualty -= 1; }
+    // Your losses land as spread wounds — a hand only dies once their hp is gone.
+    woundRandomCrew(pLoss * T.woundBoardScale);
+    for (const c of state.run.crew) gainSkill(c, "melee", T.xpMeleePerBoardTick);
     if (b.enemy.crew <= 0) { bd.done = true; bd.result = "captured"; endBattle("captured"); }
     else if (crewAlive() <= 0) { bd.done = true; bd.result = "wiped"; endBattle("lost"); }
   }
@@ -737,6 +839,7 @@
     if (b.enemy.surrendered && kind === "sunk") lines.push("(They had struck — boarding would have paid more.)");
     // Faction consequences + any bounty on this foe.
     applyEnemyRep(tmpl);
+    changeMorale(kind === "captured" ? T.moraleCapture : T.moraleWin);   // a win lifts spirits
     if (tmpl.faction === "navy") lines.push("Word spreads: the brethren toast you; the Crown does not.");
     for (const bq of checkBountyQuests(tmpl.key)) lines.push.apply(lines, bq.lines);
     state.run.gold += gold; state.run.supplies += supplies;
@@ -759,7 +862,32 @@
   // Port
   // ---------------------------------------------------------------------------
   function buildPort() {
-    state.port = { tab: "yard", weaponBuy: null, recruit: makeCrew({}) };
+    state.port = { tab: "yard", weaponBuy: null, recruit: makeCrew({}), sel: null };
+    // Reaching port is shore leave: overwork resets and spirits lift a little.
+    state.run.legsSincePort = 0;
+    changeMorale(6);
+  }
+  // Engine-defined event (full access) fired when the crew rises up.
+  function mutinyEvent() {
+    const run = state.run;
+    const cost = Math.max(20, T.sharePerCrew * run.crew.length * 2);
+    return {
+      id: "mutiny", title: "Mutiny!",
+      text: "Grumbling turns to steel. A knot of hands corners you on the quarterdeck, demanding their due.",
+      options: [
+        { label: "Pay them off (" + cost + "g)", req: () => run.gold >= cost, reqText: "need " + cost + " gold",
+          effect: () => { run.gold -= cost; run.morale = clamp(Math.max(run.morale, 52), 0, 100); return { lines: ["Gold buys peace — for now. The hands grumble back to their posts."] }; } },
+        { label: "Face down the ringleaders", effect: () => {
+            const order = run.crew.slice().sort((a, z) => (a.loyalty || 0) - (z.loyalty || 0));
+            const victim = order[0];
+            const lines = ["Steel settles it on the quarterdeck."];
+            if (victim && run.crew.length > 1) { lines.push(victim.name + " led the mutiny — and did not survive it."); killCrewMember(victim); }
+            run.morale = clamp(Math.max(run.morale, 42), 0, 100);
+            for (const c of run.crew) c.loyalty = clamp((c.loyalty || 0) + 6, 0, 100);
+            return { lines }; } },
+        { label: "Promise them the next fat prize", effect: () => { run.morale = clamp(run.morale + 12, 0, 100); return { lines: ["Fine words buy a little calm. Deliver soon, or this ends worse."] }; } },
+      ],
+    };
   }
   function repairCost() {
     const a = state.run.areas; let cost = 0;
@@ -866,16 +994,26 @@
         }
         // your ship marker
         text("⛵", cur.x, cur.y + 5, 22, C.paper, "center");
-        // HUD bar
-        panel(0, H - 64, W, 64, C.panel);
+        // HUD bar (two rows)
+        panel(0, H - 84, W, 84, C.panel);
         const r = state.run;
-        text("Gold " + r.gold, 24, H - 30, 18, C.gold, "left", "bold");
-        text("Supplies " + r.supplies, 150, H - 30, 18, r.supplies <= 2 ? C.danger : C.text);
-        text("Crew " + r.crew.length + "/" + D.SHIP_CLASSES[r.shipClass].crewCap, 320, H - 30, 18, C.text);
-        text("Notoriety " + r.notoriety, 470, H - 30, 18, r.notoriety > 50 ? C.danger : C.dim);
-        text(D.SHIP_CLASSES[r.shipClass].name, W - 24, H - 30, 18, C.dim, "right");
-        text("Click a glowing port to sail there.", W / 2, H - 30, 15, C.dim, "center", "italic");
-        if (state.flash > 0) { state.flash -= 0.02; text("A hand starved — supplies ran dry!", W / 2, H - 80, 16, C.danger, "center", "bold"); }
+        const wc = woundedCount();
+        text("Gold " + r.gold, 24, H - 54, 17, C.gold, "left", "bold");
+        text("Supplies " + r.supplies, 150, H - 54, 16, r.supplies <= 2 ? C.danger : C.text);
+        text("Crew " + r.crew.length + "/" + D.SHIP_CLASSES[r.shipClass].crewCap + (wc ? "  (" + wc + " wounded)" : ""), 300, H - 54, 16, wc ? C.gold : C.text);
+        text("Notoriety " + r.notoriety, 540, H - 54, 16, r.notoriety > 50 ? C.danger : C.dim);
+        text(D.SHIP_CLASSES[r.shipClass].name, W - 24, H - 54, 16, C.dim, "right");
+        // Morale line + rum ration.
+        text("Morale", 24, H - 24, 15, C.text);
+        bar(92, H - 34, 130, 12, r.morale / T.moraleMax, moraleColor(r.morale));
+        text(moraleLabel(r.morale), 232, H - 24, 14, moraleColor(r.morale), "left", "italic");
+        const canRum = r.supplies >= T.rumRationSupplies;
+        if (button(360, H - 38, 190, 26, "Rum ration (−" + T.rumRationSupplies + " supplies)", { size: 12, disabled: !canRum, bg: C.panelLt })) {
+          if (canRum) { r.supplies -= T.rumRationSupplies; changeMorale(T.rumRationMorale);
+            for (const c of r.crew) if (D.TRAITS[c.trait].rumLove) c.loyalty = clamp((c.loyalty || 0) + 8, 0, 100); save(); }
+        }
+        text("Click a glowing port to sail there.", W - 24, H - 24, 14, C.dim, "right", "italic");
+        if (state.flash > 0) { state.flash -= 0.02; text("A hand starved — supplies ran dry!", W / 2, H - 100, 16, C.danger, "center", "bold"); }
       },
     },
 
@@ -1111,9 +1249,11 @@
       const seld = b.sel === c;
       if (inRect(cx, ry, 244, 15)) { ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fillRect(cx, ry, 244, 15); if (mouse.clicked) { mouse.clicked = false; b.sel = seld ? null : c; } }
       if (seld) { ctx.strokeStyle = C.hi; ctx.lineWidth = 1; ctx.strokeRect(cx, ry, 244, 15); }
-      const nm = c.name.length > 17 ? c.name.slice(0, 16) + "…" : c.name;
-      text((seld ? "▸ " : "") + nm, cx + 4, ry + 12, 12, seld ? C.hi : C.text);
-      text("G" + Math.round(c.skills.gunnery || 0), cx + 176, ry + 12, 11, C.dim);
+      const hp = c.hp == null ? 100 : c.hp;
+      const nm = c.name.length > 15 ? c.name.slice(0, 14) + "…" : c.name;
+      const nmCol = seld ? C.hi : hp < 40 ? C.danger : hp < 100 ? C.gold : C.text;
+      text((seld ? "▸ " : "") + nm + (hp < 100 ? " ✚" : ""), cx + 4, ry + 12, 12, nmCol);
+      text(rankOf(c.skills.gunnery || 0).tag, cx + 172, ry + 12, 11, C.dim);
       text(crewPostLabel(c), cx + 206, ry + 12, 11, C.gold);
     }
     if (state.run.crew.length > shown) text("+" + (state.run.crew.length - shown) + " more (win/lose hands to see)", cx, y0 + 28 + shown * 16 + 10, 10, C.dim);
@@ -1203,23 +1343,25 @@
       text(D.FACTIONS[f].label + " " + (v > 0 ? "+" : "") + v, rxp, 80, 13, v > 4 ? C.green : v < -4 ? C.danger : C.dim);
       rxp += ctx.measureText(D.FACTIONS[f].label + " " + v).width + 28;
     }
+    text("Morale: " + moraleLabel(r.morale), 360, 54, 16, moraleColor(r.morale), "left", "italic");
     text("Gold " + r.gold, W - 360, 48, 18, C.gold, "left", "bold");
     text("Supplies " + r.supplies, W - 360, 74, 15, C.text);
     text("Crew " + r.crew.length + "/" + D.SHIP_CLASSES[r.shipClass].crewCap, W - 200, 48, 18, C.text);
     if (priceMult() !== 1) text((priceMult() < 1 ? "Goodwill: prices down" : "Distrust: prices up"), W - 200, 74, 13, priceMult() < 1 ? C.green : C.danger);
 
     // tabs
-    const tabs = [["yard", "Shipwright"], ["tavern", "Tavern"], ["market", "Market"], ["rumors", "Rumours"]];
+    const tabs = [["yard", "Shipwright"], ["tavern", "Tavern"], ["market", "Market"], ["crew", "Crew"], ["rumors", "Rumours"]];
     let tx = 40;
     for (const [k, label] of tabs) {
-      if (button(tx, 110, 138, 38, label, { bg: P.tab === k ? C.wood : C.panelLt, hover: "#855c33" })) P.tab = k;
-      tx += 148;
+      if (button(tx, 110, 116, 38, label, { bg: P.tab === k ? C.wood : C.panelLt, hover: "#855c33", size: 14 })) P.tab = k;
+      tx += 124;
     }
 
     panel(40, 165, W - 80, 330);
     if (P.tab === "yard") renderYard();
     else if (P.tab === "tavern") renderTavern();
     else if (P.tab === "market") renderMarket();
+    else if (P.tab === "crew") renderCrew();
     else renderRumors();
 
     if (button(40, H - 56, 150, 40, "⛵ Set Sail", { bg: C.wood, hover: "#855c33" })) { state.screen = "map"; save(); }
@@ -1248,7 +1390,7 @@
     else {
       const can = r.gold >= cost;
       if (button(70, y + 10, 260, 42, "Repair all — " + cost + " gold", { disabled: !can, bg: can ? "#2c5a3a" : undefined, hover: "#3f8a4f" })) {
-        if (can) { r.gold -= cost; r.areas = freshAreas(); save(); }
+        if (can) { r.gold -= cost; r.areas = freshAreas(); for (const c of r.crew) gainSkill(c, "repair", T.xpRepairPerPortFix); save(); }
       }
       if (!can) text("Not enough gold for a full repair.", 70, y + 74, 14, C.danger);
     }
@@ -1262,7 +1404,7 @@
     text(c.name, 90, 258, 20, C.hi, "left", "bold");
     text(D.TRAITS[c.trait].label + " — " + D.TRAITS[c.trait].blurb, 90, 285, 14, C.gold, "left", "italic");
     let sy = 312;
-    for (const s of D.SKILLS) { text(s + ": " + c.skills[s], 90, sy, 14, C.text); sy += 20; }
+    for (const s of D.SKILLS) { const v = c.skills[s] || 0; text(s + ": " + rankOf(v).label + (v >= 3.5 ? " ★" : ""), 90, sy, 14, v >= 3.5 ? C.green : C.text); sy += 20; }
     const cap = D.SHIP_CLASSES[r.shipClass].crewCap;
     const full = r.crew.length >= cap;
     const recruitCost = Math.round(D.PORT.recruitCost * priceMult());
@@ -1340,6 +1482,70 @@
     if (r.questsDone.length) text("Completed: " + r.questsDone.length, 70, y + 6, 13, C.green);
   }
 
+  // --- Crew management screen (port "Crew" tab) ---
+  const SKILL_SHORT = { gunnery: "Gun", sailing: "Sail", repair: "Rep", melee: "Mel", medicine: "Med", navigation: "Nav" };
+  const roleCycleList = () => [null].concat(Object.keys(D.OFFICER_ROLES));
+  function nextRoleLabel(c) { const l = roleCycleList(); const nx = l[(l.indexOf(c.role || null) + 1) % l.length]; return nx ? D.OFFICER_ROLES[nx].label : "None"; }
+  function promoteCycle(c) {
+    const l = roleCycleList(); const nx = l[(l.indexOf(c.role || null) + 1) % l.length];
+    if (nx) { const cur = state.run.crew.find((x) => x.role === nx); if (cur) cur.role = null; }   // one holder per role
+    c.role = nx; save();
+  }
+  function dividePlunderCost() { return T.sharePerCrew * state.run.crew.length; }
+  function tendWoundedCost() { let miss = 0; for (const c of state.run.crew) miss += 100 - (c.hp == null ? 100 : c.hp); return Math.round(miss * T.infirmaryCostPerHp * priceMult()); }
+  function bestBuyableWeapon(c) {
+    let best = null;
+    for (const wk of D.PORT.weaponStock) {
+      const wp = D.WEAPONS[wk], cost = Math.round(wp.cost * priceMult());
+      if (wp.melee > D.WEAPONS[c.weapon].melee && state.run.gold >= cost && (!best || wp.melee > D.WEAPONS[best].melee)) best = wk;
+    }
+    return best;
+  }
+  function renderCrew() {
+    const r = state.run, P = state.port;
+    text("The Ship's Company — " + r.crew.length + "/" + D.SHIP_CLASSES[r.shipClass].crewCap, 60, 198, 18, C.text, "left", "bold");
+    // Global actions.
+    const dp = dividePlunderCost();
+    if (button(W - 372, 178, 176, 30, "Divide plunder (" + dp + "g)", { size: 12, disabled: r.gold < dp, bg: C.panelLt })) {
+      if (r.gold >= dp) { r.gold -= dp; changeMorale(T.shareMorale); for (const c of r.crew) c.loyalty = clamp((c.loyalty || 0) + 8, 0, 100); save(); }
+    }
+    const tw = tendWoundedCost();
+    if (button(W - 188, 178, 150, 30, tw > 0 ? "Tend wounded (" + tw + "g)" : "No wounded", { size: 12, disabled: tw <= 0 || r.gold < tw, bg: C.panelLt })) {
+      if (tw > 0 && r.gold >= tw) { r.gold -= tw; for (const c of r.crew) c.hp = 100; save(); }
+    }
+    // Roster.
+    const rows = Math.min(7, r.crew.length);
+    let y = 222;
+    for (let i = 0; i < rows; i++) {
+      const c = r.crew[i], sel = P.sel === c, rowY = y;
+      if (inRect(52, rowY, W - 104, 30)) { ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fillRect(52, rowY, W - 104, 30); if (mouse.clicked) { mouse.clicked = false; P.sel = sel ? null : c; } }
+      if (sel) { ctx.strokeStyle = C.hi; ctx.lineWidth = 1; ctx.strokeRect(52, rowY, W - 104, 30); }
+      text(c.name, 62, rowY + 14, 14, sel ? C.hi : C.text, "left", "bold");
+      text(D.TRAITS[c.trait].label + (c.role ? " · " + D.OFFICER_ROLES[c.role].label : ""), 62, rowY + 27, 11, c.role ? C.gold : C.dim);
+      let sx = 250;
+      for (const s of D.SKILLS) { const v = c.skills[s] || 0; text(SKILL_SHORT[s] + " " + rankOf(v).tag, sx, rowY + 18, 11, v >= 3.5 ? C.green : C.dim); sx += 70; }
+      const hp = c.hp == null ? 100 : c.hp;
+      bar(W - 250, rowY + 9, 84, 10, hp / 100, hp > 60 ? C.green : hp > 30 ? C.gold : C.danger);
+      text("Loy " + Math.round(c.loyalty || 0), W - 156, rowY + 18, 11, (c.loyalty || 0) < 40 ? C.danger : C.dim);
+      y += 34;
+    }
+    if (r.crew.length > rows) text("…and " + (r.crew.length - rows) + " more below decks", 62, y + 4, 11, C.dim);
+    // Selected-hand actions.
+    const c = P.sel;
+    if (c) {
+      const ay = 468;
+      const upg = bestBuyableWeapon(c);
+      text("Selected: " + c.name + " — carrying " + D.WEAPONS[c.weapon].label, 60, ay - 6, 13, C.hi, "left", "bold");
+      if (button(60, ay, 168, 28, "Promote ▸ " + nextRoleLabel(c), { size: 12, bg: C.panelLt })) promoteCycle(c);
+      if (button(238, ay, 168, 28, upg ? "Arm: " + D.WEAPONS[upg].label + " (" + Math.round(D.WEAPONS[upg].cost * priceMult()) + "g)" : "Best steel aboard", { size: 12, bg: C.panelLt, disabled: !upg })) {
+        if (upg) { r.gold -= Math.round(D.WEAPONS[upg].cost * priceMult()); c.weapon = upg; save(); }
+      }
+      if (button(416, ay, 120, 28, "Dismiss", { size: 12, bg: "#5a2a22", hover: "#7a3a2a", disabled: r.crew.length <= 1 })) { if (r.crew.length > 1) { killCrewMember(c); P.sel = null; save(); } }
+    } else {
+      text("Select a hand to promote, arm, or dismiss. Officers grant ship-wide bonuses.", 60, 476, 13, C.dim, "left", "italic");
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Main loop (fixed timestep) + boot
   // ---------------------------------------------------------------------------
@@ -1362,7 +1568,7 @@
   // Debug/testing surface (harmless in play — nothing calls it automatically).
   window.BLACKTIDE = {
     get state() { return state; }, D,
-    api: { sailTo, openEvent, rollEvent, addQuest, buildPort, startBattle },
+    api: { sailTo, openEvent, rollEvent, addQuest, buildPort, startBattle, officerMult, rankOf },
   };
   requestAnimationFrame(frame);
 })();

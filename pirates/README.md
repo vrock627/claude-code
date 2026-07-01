@@ -65,6 +65,12 @@ Checks every data record's shape and the core battle-math invariants
 - **Quests & factions** — take contracts (bounty / delivery / treasure) from port rumour
   boards; your deeds shift standing with the **Navy, Merchant Guild, and Pirate
   Brethren**, which colours prices and what's on offer.
+- **A deep crew** — every named hand **levels the skill they work** (Green → Able → Salt →
+  Master); takes **wounds** that heal over voyages (faster with a surgeon) and can **die**;
+  and has **morale & loyalty** — win, plunder, and pour a **rum ration** to keep spirits up,
+  or face a **mutiny** when it bottoms out. Promote **officers** (Quartermaster, Boatswain,
+  Master Gunner, Ship's Doctor, Navigator) for ship-wide bonuses, and manage it all from the
+  port **Crew** tab (promote / arm / dismiss / divide the plunder / tend the wounded).
 - **Roguelike economy** — gold, supplies, crew, ship condition; permadeath; reach the
   retire-gold goal at any port to win the run.
 

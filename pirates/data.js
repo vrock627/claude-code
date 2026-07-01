@@ -63,7 +63,27 @@
     surgeon:  { key: "surgeon",  label: "Surgeon",   blurb: "Keeps the wounded breathing.",      mods: { medicine: 2 } },
     sailor:   { key: "sailor",   label: "Old Salt",  blurb: "Reads wind and sail by instinct.",  mods: { sailing: 2 } },
     lookout:  { key: "lookout",  label: "Lookout",   blurb: "Eagle-eyed; sees trouble early.",   mods: { navigation: 2 } },
-    drunkard: { key: "drunkard", label: "Drunkard",  blurb: "Cheap and merry, but unreliable.",  mods: { melee: 1, gunnery: -1 } },
+    drunkard: { key: "drunkard", label: "Drunkard",  blurb: "Cheap and merry, but unreliable.",  mods: { melee: 1, gunnery: -1 }, loy: -8, rumLove: true },
+  };
+
+  // Skill ranks: a skill value maps to the highest rank whose `min` it meets.
+  // Effect formulas already scale on the raw value; ranks are the UI face of it.
+  const RANKS = [
+    { min: 0,   label: "Green",  tag: "Grn" },
+    { min: 1.5, label: "Able",   tag: "Abl" },
+    { min: 3.5, label: "Salt",   tag: "Slt" },
+    { min: 5.5, label: "Master", tag: "Mst" },
+  ];
+
+  // Officer roles — one holder each (stored as crew.role). Full effect when the
+  // holder has the matching `trait`, reduced otherwise. Engine reads the numeric
+  // fields; see officerFactor/officer* in game.js.
+  const OFFICER_ROLES = {
+    quartermaster: { key: "quartermaster", label: "Quartermaster", trait: "brawler", blurb: "Keeps order; steadier morale, fiercer boarding.", moraleDecayMult: 0.5, boardBonus: 0.15 },
+    boatswain:     { key: "boatswain",     label: "Boatswain",     trait: "sailor",  blurb: "Drives the rigging; more speed and sharper turns.", sailMult: 1.18 },
+    master_gunner: { key: "master_gunner", label: "Master Gunner", trait: "gunner",  blurb: "Runs the gun deck; quicker reloads, better aim.", reloadMult: 0.9, accBonus: 0.04 },
+    ships_doctor:  { key: "ships_doctor",  label: "Ship's Doctor", trait: "surgeon", blurb: "Runs the cockpit; the wounded mend faster.", healMult: 1.7, saveChance: 0.45 },
+    navigator:     { key: "navigator",     label: "Navigator",     trait: "lookout", blurb: "Reads chart and sky; thriftier, safer voyages.", supplyPerLeg: -1, scout: 1 },
   };
 
   // Captain backgrounds chosen at creation. Grants a crew-wide perk.
@@ -283,11 +303,46 @@
     // Economy
     loomSellRate: 0.6,        // (reserved) cargo sell fraction
     sinkGoldMult: 0.45,        // sinking yields less than capturing
+
+    // --- Crew depth (iteration 3) ---
+    // Skill growth (gunnery uses gunneryXpPerFire above)
+    xpSailPerSec: 0.02,        // sailing XP for Sails/Helm crew, per battle second
+    xpRepairPerSec: 0.05,      // repair XP for Pumps crew while flooding is fought
+    xpMeleePerBoardTick: 0.06, // melee XP for boarders per exchange
+    xpMedicinePerHeal: 0.05,   // medicine XP for the healer each leg they mend someone
+    xpNavPerLeg: 0.08,         // navigation XP per map leg (extra for a Navigator/Lookout)
+    xpRepairPerPortFix: 0.4,   // repair XP shared when the shipwright patches you up
+
+    // Wounds & healing (crew hp 0..100; 0 = dead)
+    woundGrape: 30,            // hp a grape casualty takes off a random hand
+    woundBoardScale: 100,      // boarding "casualty points" → hp damage multiplier
+    healBase: 9,               // hp a wounded hand recovers per leg
+    healPerMedicine: 3,        // extra hp/leg per point of the best medicine aboard
+    infirmaryCostPerHp: 0.7,   // gold per hp when resting the crew at a port
+
+    // Morale & mutiny (run.morale 0..100)
+    startMorale: 65,
+    moraleMax: 100,
+    moraleWin: 8,              // beat/drive off a foe
+    moraleCapture: 12,         // take a prize
+    moraleTreasure: 15,
+    moraleLoss: 16,            // (subtracted) losing/fleeing a fight
+    moraleLostHand: 6,         // (subtracted) each hand who dies
+    moraleStarve: 12,          // (subtracted) a leg with no supplies
+    moraleOverwork: 2,         // (subtracted) per leg beyond the grace period at sea
+    overworkGraceLegs: 3,      // legs at sea before overwork bites
+    rumRationSupplies: 3,      // cost of a rum ration
+    rumRationMorale: 14,
+    sharePerCrew: 7,           // gold per hand to divide the plunder
+    shareMorale: 18,
+    loyaltyStart: 60,
+    mutinyThreshold: 25,       // morale below this risks mutiny
+    mutinyChancePerPoint: 0.012, // per point below threshold, per leg
   };
 
   window.PIRATEDATA = {
     AREAS, SHOT_TYPES, SHIP_CLASSES, STATIONS, SKILLS, TRAITS, CAPTAIN_TRAITS,
-    WEAPONS, ENEMIES, FACTIONS, EVENTS, QUESTS, PORT_QUESTS,
+    RANKS, OFFICER_ROLES, WEAPONS, ENEMIES, FACTIONS, EVENTS, QUESTS, PORT_QUESTS,
     FIRST_NAMES, NICKNAMES, PORT, TUNING,
   };
 })();
