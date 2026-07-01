@@ -492,6 +492,14 @@
               "Undress the moment slowly — kiss her there": [
                 "She lets you take it apart in pieces. Every layer is a question and she answers each one out loud, low: \"yes. yes. — yes.\"",
               ],
+              "Slide her hand where you want it": [
+                "She answers without hesitation, eyes on your face the whole time. \"…like that. Exactly like that, daddy.\"",
+                "She wraps her hand around you and keeps it slow on purpose, watching every reaction. \"I've thought about this,\" she says, quiet. \"A lot.\"",
+              ],
+              "Ask her to go down on you": [
+                "She goes slow and deliberate and doesn't break eye contact once. The control is entirely hers and she means it that way.",
+                "She takes her time about it, watching your face do whatever it does. \"…hi,\" she says after, voice completely wrecked. \"Stay with me.\"",
+              ],
               "Take it all the way": [
                 "She breathes out hard against your mouth. \"…yes. Come here. Come here, daddy.\"",
               ],
@@ -616,6 +624,12 @@
       inside: [
         "Neither of you stops or wants to. Her legs lock you in. The unspoken thing very loud in the quiet right after.",
         "She decides it at the same moment you do — keeps you there, heartbeat slamming against yours, not saying the obvious.",
+      ],
+      insideAdverse: [
+        "A beat of silence, then she's laughing — not the good kind, not quite the bad kind. \"…okay. Okay. We did that.\" Her hand on your chest, not pushing, just — needing a second.",
+        "She goes very still after. Not cold. Just somewhere she didn't plan to be. \"…hi,\" she manages, eventually. \"I need a minute. Just a minute. Stay.\"",
+        "Her breath comes out shaky. \"…that was — \" She doesn't finish the sentence. Can't. Her hand comes up to cover her eyes and she's laughing and you can't quite tell if she's going to cry or not.",
+        "\"…I didn't think about the after part,\" she admits, small. \"I was only thinking about the during part. Which was — \" She exhales. \"I need to sit up. Just for a second.\"",
       ],
 
       // ----- Finish-where pools -----

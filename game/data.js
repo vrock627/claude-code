@@ -244,7 +244,7 @@
       gates: { homeRomance: 78, intimacyComposite: 82, partyPrivateInterest: 78 },
       marriage: { active: true, anxietyAt: 50 },
       dateFlow: "hub",
-      hasFinishWhere: true,
+      hasFinishWhere: true, insideAdverseChance: 0.45,
       stageGates: { flirting: 30 },
       opens: {
         cold: ["Krystalle twists her ring on her finger without thinking. \"Hi. Hi — sorry, I'm somewhere else today.\"", "Krystalle, half a step back: \"You're sweet to come over. I'm a little spoken-for, you know that, right?\""],
@@ -653,6 +653,8 @@
         actions: [
           { label: "Lie down together, just close", fx: { rom: 10, aff: 8, lib: 4, inti: 3 }, lines: ["You don't rush anything. You lie down facing her, fully clothed, the lamp still on, and just be close — her fingertips tracing idle lines on your arm, talking in near-whispers about nothing important. It's almost unbearably good, and it isn't even the point."] },
           { label: "Undress the moment slowly — kiss her there", roll: { dc: 14, win: { fx: { rom: 14, lib: 12, inti: 4 }, kiss: true, lines: ["You kiss her standing at the foot of the bed and let it build with no hurry at all — every layer of distance peeled back one at a time, her breath catching against your mouth, her hands deciding things before she says them. By the time you ease down onto the bed there's nothing tentative left in it."] }, lose: { hard: true, fx: { rom: -10, aff: -6 }, lines: ["You move too fast for where she actually is. {n} catches your hands and holds them still. \"I want to — I do — just not tonight, not like this.\" She means it kindly, and she means it. The night doesn't recover from here, and you both quietly know it."] } } },
+          { label: "Slide her hand where you want it", gate: { inti: 7, rom: 48 }, roll: { dc: 14, win: { fx: { rom: 11, lib: 14, inti: 4 }, lines: ["She answers by sliding her hand down to where you want it and keeping her eyes on your face the whole time — reading every reaction, adjusting, holding the pace she decides on. You don't perform any of it. She knows exactly what she's doing and she likes that you know it."] }, lose: { fx: { rom: -8, aff: -5 }, lines: ["She moves your hand away, gentle and unhurried. \"Too much, too fast — give me a second.\" She keeps your hand in both of hers and doesn't let go, and the moment recalibrates."] } } },
+          { label: "Ask her to go down on you", gate: { inti: 8, rom: 54 }, roll: { dc: 16, win: { fx: { rom: 14, lib: 18, inti: 5, kiss: true }, lines: ["She doesn't answer in words. She goes down slow and unhurried, the way she does everything once she's decided — eyes up, watching your face the whole time like that's the interesting part. It is the interesting part. You stop being able to hold a complete thought somewhere in the middle of it, and she clearly enjoys the exact moment that happens."] }, lose: { hard: true, fx: { rom: -11, aff: -7 }, lines: ["She puts a hand flat on your chest, firm and quiet. \"…no. Not that. Not tonight.\" A line, calmly held, and she means it — not angry, just certain. She sits back and the mood goes with her, and neither of you has a good way back to where the night was."] } } },
           { label: "Take it all the way", gate: { inti: 9, rom: 60 }, roll: { dc: 15, win: { sex: true }, lose: { hard: true, fx: { rom: -12, aff: -7 }, lines: ["You reach for more than the moment is holding. {n} stops you — fully, gently, not unkindly. \"Hey. Not tonight.\" She sits up, fixes her shirt, and the warmth goes out of the room like a door opened on winter. The night's over, and it didn't end the way you wanted."] } } },
           { label: "Step back out", rooms: true },
         ] },
@@ -720,7 +722,7 @@
       ask: "Everything narrows to right here — the lamp off, the city a long way down, {n}'s breath uneven against your jaw and her hand fisted in the back of your collar like she's not planning to let go of it. There's one honest beat left before this goes all the way, and she's holding still through it, waiting to see how you take it.",
       condom: { lines: ["You reach for it and she watches you do it and the last of the tension goes out of her shoulders all at once — that specific ease that only comes from not having had to ask for it. After that there is nothing careful left. It's slow and then not, her mouth at your throat and then her teeth, your name said into the dark like it's the only word she's kept. It goes on a long time and neither of you wastes a second of it being shy about what you want.", "Later she's tucked into the dark along the length of you, tracing your collarbone with one idle finger, not asleep, not talking, not going anywhere."], fx: { rom: 18, lib: 16, inti: 5, kiss: true } },
       raw: {
-        dc: 14,
+        dc: 17,
         win: { lines: ["She holds your eyes for the unasked question and answers it by pulling you the rest of the way down with her, both hands, no hesitation in any of it. It's unhurried and then it absolutely isn't — entirely, mutually meant, trust doing half the work the want started and neither of you bothering to be quiet about the rest. She gets a hand in your hair and her mouth at your ear and tells you, specifically, and you listen.", "Later she's folded into the dark against you, sweat cooling, her finger drawing slow nothing on your chest, in no state and no hurry to be anywhere that isn't this."], fx: { rom: 20, lib: 18, inti: 6, kiss: true } },
         lose: { hard: true, fx: { rom: -11, aff: -7 }, lines: ["She stops your hand flat. \"No — not like that. Not without.\" It's not anger, it's a line, and you went over it. The warmth goes out of the room all at once, and the night with it."] },
       },
@@ -827,7 +829,7 @@
       ask: "It narrows down to just the fogged-in dark of the car and the sound of both of you breathing. {n}'s hand is fisted in your collar and not letting go. One honest beat left before this goes all the way.",
       condom: { lines: ["You've got one and she watches you have it and the last of the held breath goes out of her — the ease that only comes from not having had to ask. After that the city's gone behind the fog on the glass and there is just the two of you and a back seat that was very much not designed for any of this and neither of you caring even slightly. It's cramped and graceless and she's laughing into your mouth about it right up until she very much isn't, and then it's none of those things, just close and certain and going on longer than the geometry should allow.", "After, she's folded against you in a space far too small for two people, fogging the last clear inch of window, not complaining about a single part of it."], fx: { rom: 17, lib: 16, inti: 5, kiss: true } },
       raw: {
-        dc: 14,
+        dc: 17,
         win: { lines: ["She holds your eyes for the unasked question and answers it by pulling you the rest of the way back with her, no hesitation, the decision made for both of you in about a second. It's close and certain and entirely mutual, the whole car gone white with it, the city erased, her breath and your name and the seat creaking and absolutely none of you caring about the last one. She is not quiet. There is nobody up here to be quiet for and she knows it.", "After, she's draped boneless half over you in a space built for one, tracing your jaw, watching the fog go slowly clear again, in no hurry to fix any of it."], fx: { rom: 19, lib: 18, inti: 6, kiss: true } },
         lose: { hard: true, fx: { rom: -11, aff: -7 }, lines: ["She stops your hand flat. \"No — not like that, not without.\" It's a line, not a mood, and you went over it. The fog on the glass goes from intimate to just cold, and the night with it."] },
       },
@@ -891,7 +893,7 @@
       ask: "It comes down to just the slap of water on the hull, the boat rocking you both, and {n} with a fist in your shirt and no intention of letting the dock have its boat back on time. One honest beat left before this goes all the way out here.",
       condom: { lines: ["You've got one and she watches you have it and the last of the held breath goes out of her — the ease that only comes from not having to ask. After that there's just the rock of the boat doing half the work, the water loud against the hull, the dark absolute, and neither of you with anywhere to be or any reason to be quiet about it. It goes on a long time. The dockhand is going to be annoyed.", "After, she's draped over you in the bottom of a small boat under more stars than seems fair, in no hurry to give any of it back."], fx: { rom: 18, lib: 17, inti: 5, kiss: true } },
       raw: {
-        dc: 14,
+        dc: 17,
         win: { lines: ["She holds your eyes for the unasked question and answers it by pulling you the rest of the way down with her, the decision made for both of you in about a second. It's the rock of the swell and the warm dark and her not staying remotely quiet because there is genuinely nobody out here, the nearest light a mile off and not watching. The boat keeps its own time and you both lose track of it entirely.", "After, she's folded against you in the bottom of the hull, salt-damp, tracing your jaw, the boat turning slow on its anchor and neither of you fixing it."], fx: { rom: 20, lib: 19, inti: 6, kiss: true } },
         lose: { hard: true, fx: { rom: -11, aff: -7 }, lines: ["She stops your hand flat. \"No — not like that, not without.\" It's a line, not a mood, and you went over it out here where there's nowhere to walk it off. The water gets cold against the hull and the night with it."] },
       },
@@ -905,7 +907,7 @@
   ];
 
   const TUNING = {
-    barCap: 100, statCap: 25, baseDC: 10, dcPerInterest: 0.1,
+    barCap: 100, statCap: 25, baseDC: 12, dcPerInterest: 0.1,
     likedStyleBonus: 5, dislikedStylePenalty: 5, likedStatBonus: 2,
     startMoney: 20,
     statModes: {
@@ -914,13 +916,13 @@
       allout: { label: "Go all-out", roll: [{ p: 0.3, min: 0, max: 0 }, { p: 0.35, min: 1, max: 1 }, { p: 0.35, min: 2, max: 2 }] },
     },
     workModes: { easy: { label: "Coast through it", mult: 1, variance: 0 }, hustle: { label: "Hustle for tips", mult: 1, variance: 0.5 } },
-    beatBar: { crit: 7, success: 4, partial: 1, fail: -3 }, beatMomentum: { crit: 2, success: 1, partial: 0, fail: -2 }, beatAffSpill: 1,
+    beatBar: { crit: 7, success: 4, partial: 1, fail: -5 }, beatMomentum: { crit: 2, success: 1, partial: 0, fail: -2 }, beatAffSpill: 1,
     revealAfter: 3,
     numberMinInterest: 15, dateMinInterest: 30, kissMinRomance: 35, kissMinInterest: 55,
-    numberDC: 13, dateDC: 14, kissDC: 18,
-    numberReward: { affection: 3 }, numberFail: { affection: -3 },
-    kissReward: { romance: 16, attractionEvent: 6 }, kissFail: { romance: -10, affection: -5 },
-    moveBaseDC: 11, movePerInterestMissing: 0.18, moveReward: { romance: 12 }, moveFail: { romance: -8, affection: -3 },
+    numberDC: 15, dateDC: 16, kissDC: 22,
+    numberReward: { affection: 3 }, numberFail: { affection: -6 },
+    kissReward: { romance: 16, attractionEvent: 6 }, kissFail: { romance: -18, affection: -9 },
+    moveBaseDC: 14, movePerInterestMissing: 0.25, moveReward: { romance: 12 }, moveFail: { romance: -14, affection: -6 },
     dateRomance: 9, dateAffection: 5, dateAttractionEvent: 4, dateContinueMinQ: 0.2, homeContinueMinRomance: 45, maxDateVenues: 3, cheapBillPenalty: 5,
     attrPhysK: 5.5, attrPhysCap: 60, attrInterestK: 4, attrVarianceSpan: 18,
     attractBaseCap: 95, attractEventCap: 32,
@@ -941,9 +943,11 @@
     // and the cheating-DC bumps that escalate after the barrier breaks.
     hubActionsMax: 6,
     hubDrDc: 2, hubDrRewardStep: 0.3,
-    cheatBaseBump: 3,           // affair stage baseline DC bump on Move
-    cheatPerSexBump: 1.5,       // +per past sex, capped
+    cheatBaseBump: 4,           // affair stage baseline DC bump on Move
+    cheatPerSexBump: 2,         // +per past sex, capped
     cheatPerSexCap: 4,          // cap on the per-past-sex multiplier
+    hubStagePenaltyDc: 5,       // DC penalty per stage below action gate (replaces lock)
+    sexInsideAdverseChance: 0.25, // baseline chance of adverse finish-inside reaction
   };
 
   // Krystalle conversation-hub categories. Each category lists actions;

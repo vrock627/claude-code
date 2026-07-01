@@ -926,10 +926,10 @@
     const o = el("div", "choices");
     for (const action of D.HUB.actions[category]) {
       const gateStage = action.gateStage;
-      const locked = gateStage && D.HUB.stageOrder.indexOf(stage) < D.HUB.stageOrder.indexOf(gateStage);
-      const lbl = action.label + (locked ? ` — not yet (need ${gateStage})` : "");
-      if (locked) o.appendChild(button(lbl, null, "choice", true));
-      else o.appendChild(button(action.label, () => resolveHubAction(category, action), action.isKiss || action.sexFlavor ? "choice move" : "choice"));
+      const stageGap = gateStage ? Math.max(0, D.HUB.stageOrder.indexOf(gateStage) - D.HUB.stageOrder.indexOf(stage)) : 0;
+      const penalty = stageGap * (T.hubStagePenaltyDc || 5);
+      const lbl = stageGap > 0 ? `${action.label}  (risky — DC +${penalty})` : action.label;
+      o.appendChild(button(lbl, () => resolveHubAction(category, action), action.isKiss || action.sexFlavor ? "choice move" : "choice"));
     }
     o.appendChild(button("Back to the table", renderConversationHub, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
@@ -949,8 +949,12 @@
       const sexCount = Math.min((state.flags.krystalleSexCount || 0), (T.cheatPerSexCap || 4));
       cheatBump += sexCount * (T.cheatPerSexBump || 1.5);
     }
+    // Stage penalty: early-stage moves aren't locked, just extra costly.
+    const gateStage = action.gateStage;
+    const stageGap = gateStage ? Math.max(0, D.HUB.stageOrder.indexOf(gateStage) - D.HUB.stageOrder.indexOf(stage)) : 0;
+    const stagePenalty = stageGap * (T.hubStagePenaltyDc || 5);
     const baseDc = action.dc || (T.baseDC + Math.round(composite(id) * T.dcPerInterest));
-    const dc = Math.round(baseDc + drDc + cheatBump);
+    const dc = Math.round(baseDc + drDc + cheatBump + stagePenalty);
     // Resolve: traitAffinity * mag + d20 + likedStat read.
     const roll = d20(), sv = effStat(c.likedStat);
     const traitV = (c.traitAffinity[action.trait] || 0) * (action.mag || 1);
@@ -995,8 +999,12 @@
     if (said) lines.push(subN(said, c.name));
     if (line) lines.push(subN(line, c.name));
     else lines.push(ok ? `${c.name} leans in. That landed.` : `${c.name} eases back, gentle but firm. "…hey. Slow down.\"`);
-    if (drDc) lines.push(`(Repeat ×${n + 1} · DC +${drDc}${cheatBump ? ` · cheat +${Math.round(cheatBump)}` : ""} → DC ${dc})`);
-    else if (cheatBump) lines.push(`(DC ${dc} — she's wrestling with this one.)`);
+    const dcNotes = [
+      drDc ? `Repeat ×${n + 1} · DC +${drDc}` : null,
+      cheatBump ? `cheat +${Math.round(cheatBump)}` : null,
+      stagePenalty ? `too soon · DC +${stagePenalty}` : null,
+    ].filter(Boolean);
+    if (dcNotes.length) lines.push(`(${dcNotes.join(" · ")} → DC ${dc})`);
     lines.push(`Rolled ${roll} + ${sv + traitV} = ${total} vs DC ${dc}.`);
     renderResult({
       title,
@@ -1662,6 +1670,14 @@
         im.log.push(vIn || F.inside.line); im.finishDone = true;
         if (!state.preg[im.id] && Math.random() < T.pregChanceRaw)
           state.preg[im.id] = { sinceDay: state.day, talked: false, status: null };
+        // Adverse response: characters with complicated feelings about
+        // finishing inside (guilt, alarm, regret) may react beyond the
+        // standard line. Per-character chance; falls back to global.
+        const adverseChance = c.insideAdverseChance != null ? c.insideAdverseChance : (T.sexInsideAdverseChance || 0);
+        if (adverseChance > 0 && Math.random() < adverseChance) {
+          const adverseLine = pick(voiceFor(im.id, "intimacy.insideAdverse"), `intim.insideAdv.${im.id}.${state.day}`);
+          if (adverseLine) im.log.push(adverseLine);
+        }
         renderIntimacyBeat();
       }, "choice move"));
     } else {
@@ -2273,7 +2289,23 @@
     renderResult({ title: `Round ${state.pg.round}`, roll: roll || null, lines: [line], tone: tone || "good", then: nextGameRound, thenLabel: state.pg.round >= gameLen() ? "Wrap up" : "Next round" });
   }
 
+  // Roll anticipation: show a "Rolling…" beat before revealing the d20
+  // result so the player feels the tension of the die in the air.
+  function renderRollReveal(rollInfo, then) {
+    saveGame(); renderHud(); clearScreen();
+    const w = el("div", "result tone-neutral");
+    w.appendChild(el("h2", null, "🎲 Rolling…"));
+    const box = el("div", "rollbox");
+    box.appendChild(el("div", "roll-line", "The die is in the air…"));
+    box.appendChild(el("div", "roll-line dim", `DC ${rollInfo.dc} — here it comes.`));
+    w.appendChild(box);
+    w.appendChild(button("See the result", then, "primary"));
+    screen().appendChild(w);
+  }
   function renderResult(p) {
+    if (p.roll && !p._rollRevealed) {
+      return renderRollReveal(p.roll, () => renderResult(Object.assign({}, p, { _rollRevealed: true })));
+    }
     saveGame(); renderHud(); clearScreen();
     const w = el("div", `result tone-${p.tone}`);
     w.appendChild(el("h2", null, p.title));
