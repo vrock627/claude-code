@@ -1949,7 +1949,19 @@
     const have = (state.inventory.condom || 0) > 0;
     const o = el("div", "choices");
     o.appendChild(button(have ? `Use a condom  (have ${state.inventory.condom})` : "Use a condom — none in your bag", have ? () => { state.inventory.condom -= 1; partyApplyFx(id, P.condom.fx); renderIntimacy(id, P.condom.lines, after, false, bk); } : null, "choice", !have));
-    o.appendChild(button("Go without — read the moment", () => { partyApplyFx(id, P.raw.fx); renderIntimacy(id, P.raw.lines, after, true, bk); }, "choice move"));
+    o.appendChild(button(`Go without — read the moment  (DC ${P.raw.dc || 16})`, () => {
+      // Going raw requires a real roll — the moment has to be exactly right.
+      const roll = d20();
+      const gauge = Math.floor(composite(id) / 6) + Math.floor(barVal(id, "libido") / 8) + Math.floor(barVal(id, "romance") / 12);
+      const dc = P.raw.dc || 16, total = roll + gauge + T.partyVibe;
+      const ok = roll !== 1 && (roll === 20 || total >= dc);
+      const rollBox = { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party heat", total, dc };
+      if (!ok) {
+        const failLines = (P.raw.failLines || [`${c.name} stops you, gentle but certain. "…no. Not like that."`]).map((l) => subN(l, c.name));
+        return renderResult({ title: "She draws the line", roll: rollBox, lines: failLines, tone: "bad", then: partyAfter, thenLabel: "Back to the party" });
+      }
+      partyApplyFx(id, P.raw.fx); renderIntimacy(id, P.raw.lines, after, true, bk);
+    }, "choice move"));
     o.appendChild(button("Slow it back down — just this", () => { partyApplyFx(id, P.back.fx); renderResult({ title: "Just this, then", lines: P.back.lines.map((l) => subN(l, c.name)), tone: "good", then: partyAfter, thenLabel: "Back" }); }, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
   }
