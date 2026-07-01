@@ -692,15 +692,28 @@
         casual: [
           "Krystalle laughs and matches you exactly. \"Look at us, two adults at a house party. Disgraceful. Don't stop.\"",
           "She rolls her eyes and matches you anyway. \"Fine. Fine. I'm dancing. Don't read into it.\"",
+          "She grabs your hand and pulls you into it without ceremony. \"I've been waiting for an excuse. I'm not admitting that.\"",
+          "Krystalle's already laughing before you've gotten started. \"You are SUCH a menace. I love it. Okay — go on. Show me.\"",
         ],
         dirty: [
           "Krystalle slides in close, hands on your hips, eyes locked on yours. \"…remind me later that I'm a respectable person.\"",
           "She's pressed against you, low laugh. \"…you're so MUCH. Why are you so much.\"",
+          "Her back to your chest, hand finding yours at her waist. \"…keep that exactly there. Don't move it. Don't.\"",
+          "She turns into you, mouth very close to your ear. \"…I told myself I wasn't going to do this.\" Doesn't stop.",
+          "Her hands find your lapels and she lets herself lean. \"…the rest of tonight belongs to the party. This part is mine.\"",
         ],
         handsy: [
           "Krystalle's hands find your collar and the room stops mattering. \"…you absolute PROBLEM.\"",
+          "Her hands at your collar, then lower, then staying where they land. \"…hi. Hi. Okay. I'm a bad person.\"",
+          "She pulls you by your shirt until your mouth is at her temple, hands flat on your chest. \"…don't make me be sensible. Not right now.\"",
+          "Krystalle turns so her back is to the room, face to yours, close enough to count eyelashes. \"…I cannot believe I'm doing this. Do not stop.\"",
         ],
       },
+      danceFailLine: [
+        "Krystalle catches your hands, gentle but clear. \"…no, hey — not here. I mean it. Read the room, including the me in it.\"",
+        "She steps back half an inch, enough to mean something. \"…too much, too fast. You had me and then you lost me. Earn it back slower.\"",
+        "Her hand comes up flat, stopping you — not cold, just decided. \"…not that. Not tonight. Give me a minute before you try again.\"",
+      ],
       bodyShot: {
         ask: [
           "Someone's lining up body shots on the island. Krystalle raises one eyebrow at you. \"…volunteering. Volunteering OR being volunteered. Which.\"",

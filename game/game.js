@@ -1863,17 +1863,19 @@
     const o = el("div", "choices");
     let handsyOpen = false;
     for (const mode of D.PARTY.dance) {
-      const locked = fi < mode.gateFlow || rc < mode.gateRecept;
-      if (mode.id === "handsy" && !locked) handsyOpen = true;
-      if (locked) o.appendChild(button(`${mode.label} — ${mode.gateFlow > fi ? "not that kind of party yet" : "she's not there with you yet"}`, null, "choice", true));
-      else o.appendChild(button(`${mode.label} — ${mode.desc}`, () => partyDance(id, mode), mode.id === "handsy" ? "choice move" : "choice"));
+      const flowGap = Math.max(0, mode.gateFlow - fi);
+      const receptGap = Math.max(0, mode.gateRecept - rc);
+      const penalty = flowGap * 4 + Math.floor(receptGap / 8);
+      if (mode.id === "handsy" && !penalty) handsyOpen = true;
+      const lbl = penalty > 0 ? `${mode.label} — ${mode.desc}  (risky — DC +${penalty})` : `${mode.label} — ${mode.desc}`;
+      o.appendChild(button(lbl, () => partyDance(id, mode, penalty), mode.id === "handsy" || (penalty > 0 && mode.risk) ? "choice move" : "choice"));
     }
     if (handsyOpen && stripLvl("you") >= 3 && stripLvl(id) >= 3)
       o.appendChild(button(`🔥 …nothing left in the way — go all the way, right here`, () => renderFloorSex(id), "choice move"));
     o.appendChild(button("Back", renderParty, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
   }
-  function partyDance(id, mode) {
+  function partyDance(id, mode, penalty) {
     const c = D.CHARACTERS[id];
     const vWin = voiceFor(id, `party.danceLine.${mode.id}`);
     const vFail = voiceFor(id, "party.danceFailLine");
@@ -1883,15 +1885,16 @@
       return;
     }
     const roll = d20(), gauge = Math.floor(recept(id) / 6) + Math.floor(barVal(id, "libido") / 12);
-    const total = roll + gauge + T.partyVibe, ok = roll !== 1 && (roll === 20 || total >= 13);
+    const dc = 13 + (penalty || 0);
+    const total = roll + gauge + T.partyVibe, ok = roll !== 1 && (roll === 20 || total >= dc);
     if (ok) {
       adjustBar(id, "romance", mode.rom); adjustBar(id, "libido", mode.lib); adjustBar(id, "attraction", 2);
       if (mode.id === "handsy") bumpHeat();
-      renderResult({ title: mode.id === "handsy" ? "She pulls you closer" : "She's right there with you", roll: { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party buzz", total, dc: 13 },
+      renderResult({ title: mode.id === "handsy" ? "She pulls you closer" : "She's right there with you", roll: { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party buzz", total, dc },
         lines: [vWin || (mode.id === "handsy" ? `${c.name}'s hands find your collar. The room stops mattering.` : `${c.name} moves in close, breath warm, completely unbothered by who's watching.`), `Romance +${mode.rom} · Libido +${mode.lib}`], tone: "good", then: partyAfter });
     } else {
       adjustBar(id, "romance", T.danceFail.romance); adjustBar(id, "affection", T.danceFail.affection);
-      renderResult({ title: "She steps back", roll: { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party buzz", total, dc: 13 },
+      renderResult({ title: "She steps back", roll: { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party buzz", total, dc },
         lines: [vFail || `${c.name} catches your hands and sets them back. "Easy. Not like that, not here."`, `Romance ${T.danceFail.romance} · Affection ${T.danceFail.affection}`], tone: "bad", then: partyAfter });
     }
   }
