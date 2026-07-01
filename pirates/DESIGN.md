@@ -3,9 +3,14 @@
 > Working title: **Black Tide** (also considered: *Salt & Powder*, *Letters of Marque*, *Hoist the Black*).
 > A pirate-themed sea-battle roguelike, heavily inspired by **FTL: Faster Than Light**.
 
-**Status:** Design document + a **playable vertical slice** now lives alongside it
+**Status:** Design document + a **playable build** now lives alongside it
 (`index.html`, `data.js`, `game.js`, `_smoke.js` — see [`README.md`](./README.md) to run it).
-This document remains the full blueprint; the slice implements §13.
+This document remains the full blueprint. Implemented so far: the §13 vertical slice, plus
+**crew-manned per-cannon gunnery** (each gun has a gunner whose skill drives its reload and
+accuracy; firing is a player order — no auto-fire), and an **events + multi-stage quests +
+faction/reputation** layer (branching sea events; bounty/delivery/treasure contracts from
+port rumour boards; standing with the Navy, Merchant Guild, and Pirate Brethren that colours
+prices and offers).
 
 ---
 

@@ -11,7 +11,7 @@
   // Canvas + render transform
   // ---------------------------------------------------------------------------
   const W = 960, H = 600;            // logical resolution
-  const HUD_TOP = 452;               // battle arena occupies y:0..HUD_TOP
+  const HUD_TOP = 428;               // battle arena occupies y:0..HUD_TOP
   const canvas = document.getElementById("game");
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext("2d");
@@ -154,6 +154,10 @@
       supplies: T.startSupplies,
       notoriety: 0,
       legs: 0,
+      rep: { navy: 0, merchants: 0, brethren: 0 },
+      quests: [],        // active quest ids
+      questsDone: [],    // completed quest ids
+      flags: {},         // misc story flags
     };
     state = { screen: "map", run, map: makeMap(), battle: null, msg: null, flash: 0 };
     save();
@@ -194,6 +198,118 @@
   }
   function nodeById(id) { return state.map.nodes.find((n) => n.id === id); }
 
+  // ---------------------------------------------------------------------------
+  // Factions, events & quests
+  // ---------------------------------------------------------------------------
+  function repChange(faction, amt) {
+    const r = state.run.rep;
+    r[faction] = clamp((r[faction] || 0) + amt, -50, 50);
+  }
+  // Helper bundle passed to event req/effect/cond so data.js stays declarative.
+  function eventAPI() {
+    const run = state.run;
+    return {
+      has: (trait) => run.crew.some((c) => c.trait === trait),
+      gold: (n) => { run.gold = Math.max(0, run.gold + n); },
+      supplies: (n) => { run.supplies = Math.max(0, run.supplies + n); },
+      rep: (f, n) => repChange(f, n),
+      notor: (n) => { run.notoriety = clamp(run.notoriety + n, 0, 200); },
+      damage: (area, n) => { run.areas[area] = clamp((run.areas[area] || 0) - n, 0, T.areaMax); },
+      repair: (area, n) => { run.areas[area] = clamp((run.areas[area] || 0) + n, 0, T.areaMax); },
+      flag: (k, v) => { run.flags[k] = v; },
+      hasFlag: (k) => !!run.flags[k],
+      addQuest: (id) => addQuest(id),
+      addCrew: () => {
+        if (run.crew.length >= D.SHIP_CLASSES[run.shipClass].crewCap) return null;
+        const c = makeCrew({}); run.crew.push(c); return c.name;
+      },
+      loseCrew: () => { if (run.crew.length <= 1) return null; const c = run.crew.pop(); return c.name; },
+    };
+  }
+  function rollEvent() {
+    const run = state.run;
+    const pool = Object.values(D.EVENTS).filter((ev) => !ev.cond || ev.cond(run));
+    if (!pool.length) return null;
+    let total = pool.reduce((s, ev) => s + (ev.weight || 1), 0);
+    let r = Math.random() * total;
+    for (const ev of pool) { r -= (ev.weight || 1); if (r <= 0) return ev; }
+    return pool[0];
+  }
+  function openEvent(def) { state.event = { def, phase: "choose", result: null }; state.screen = "event"; }
+  function resolveEventOption(opt) {
+    const res = opt.effect ? (opt.effect(state.run, eventAPI()) || {}) : {};
+    if (!res.lines) res.lines = ["…"];
+    state.event.result = res; state.event.phase = "result"; save();
+  }
+  function finishEvent() {
+    const res = state.event.result || {};
+    state.event = null;
+    if (res.battle) {
+      // Synthetic encounter node so the existing battle flow can run.
+      startBattle({ enemy: res.battle, name: "Open Water", type: "sea", links: [state.map.current] });
+    } else { state.screen = "map"; save(); }
+  }
+
+  // --- Quests ---
+  const questActive = (id) => state.run.quests.includes(id);
+  const questDone = (id) => state.run.questsDone.includes(id);
+  function questReqMet(id) {
+    const q = D.QUESTS[id]; if (!q) return false;
+    if (questActive(id) || questDone(id)) return false;
+    for (const f in (q.reqRep || {})) if ((state.run.rep[f] || 0) < q.reqRep[f]) return false;
+    return true;
+  }
+  function addQuest(id) {
+    if (!D.QUESTS[id] || questActive(id) || questDone(id)) return;
+    state.run.quests.push(id);
+    if (D.QUESTS[id].targetNode != null) { const n = nodeById(D.QUESTS[id].targetNode); if (n) n.quest = id; }
+    save();
+  }
+  function completeQuest(id, extraLines) {
+    const q = D.QUESTS[id]; if (!q || !questActive(id)) return null;
+    state.run.quests = state.run.quests.filter((x) => x !== id);
+    state.run.questsDone.push(id);
+    const rw = q.reward || {};
+    if (rw.gold) state.run.gold += rw.gold;
+    for (const f in (rw.rep || {})) repChange(f, rw.rep[f]);
+    if (q.targetNode != null) { const n = nodeById(q.targetNode); if (n) delete n.quest; }
+    save();
+    return { title: "Quest complete: " + q.title, lines: (extraLines || []).concat(["Reward: " + (rw.gold || 0) + " gold."]) };
+  }
+  // Arrival/battle hooks.
+  function checkArrivalQuests(node) {
+    const done = [];
+    for (const id of state.run.quests.slice()) {
+      const q = D.QUESTS[id];
+      if (q.type === "delivery" && node.type === "port" && node.name === q.targetPort) {
+        const r = completeQuest(id, ["The Guild factor takes the silk with a nod."]); if (r) done.push(r);
+      }
+    }
+    return done;
+  }
+  function treasureQuestForNode(node) {
+    for (const id of state.run.quests) { const q = D.QUESTS[id]; if (q.type === "treasure" && q.targetNode === node.id) return id; }
+    return null;
+  }
+  function checkBountyQuests(enemyKey) {
+    const done = [];
+    for (const id of state.run.quests.slice()) {
+      const q = D.QUESTS[id];
+      if (q.type === "bounty" && q.targetEnemy === enemyKey) { const r = completeQuest(id, ["The bounty is yours."]); if (r) done.push(r); }
+    }
+    return done;
+  }
+  // Reputation shift for defeating an enemy, by its faction.
+  function applyEnemyRep(tmpl) {
+    if (!tmpl || !tmpl.faction) return;
+    if (tmpl.faction === "navy") { repChange("brethren", 4); repChange("navy", -5); }
+    else if (tmpl.faction === "merchants") { repChange("merchants", -6); repChange("brethren", 2); }
+  }
+  // Merchant reputation nudges port prices (goodwill = discount).
+  function priceMult() {
+    return clamp(1 - (state.run.rep.merchants || 0) * T.repPriceSwing, 0.75, 1.35);
+  }
+
   function sailTo(id) {
     const from = nodeById(state.map.current);
     if (!from.links.includes(id)) return;
@@ -212,10 +328,34 @@
     const n = nodeById(id);
     for (const l of n.links) if (!state.map.revealed.includes(l)) state.map.revealed.push(l);
     save();
+    // Delivery quests complete on arrival at their destination port.
+    const arrived = checkArrivalQuests(n);
     // Resolve the destination encounter.
-    if (n.type === "enemy") startBattle(n);
-    else if (n.type === "port") { state.screen = "port"; buildPort(); }
-    else { state.msg = { title: n.name, lines: ["Calm seas. Nothing but salt and horizon."], then: () => { state.screen = "map"; } }; state.screen = "msg"; }
+    if (n.type === "enemy") { startBattle(n); return; }
+    if (n.type === "port") { showMsgs(arrived, () => { state.screen = "port"; buildPort(); }); return; }
+    // Non-combat water / island / reef nodes:
+    const tq = treasureQuestForNode(n);
+    if (tq) { openTreasureDig(tq); return; }
+    if (Math.random() < T.eventChance) { const ev = rollEvent(); if (ev) { openEvent(ev); return; } }
+    showMsgs(arrived, null, { title: n.name, lines: ["Calm seas. Nothing but salt and horizon."] });
+  }
+  // Show a list of quest-completion messages (or a fallback), then continue.
+  function showMsgs(list, then, fallback) {
+    then = then || (() => { state.screen = "map"; });
+    if (!list || !list.length) {
+      if (fallback) { state.msg = { title: fallback.title, lines: fallback.lines, then }; state.screen = "msg"; return; }
+      then(); return;
+    }
+    const lines = []; for (const m of list) lines.push.apply(lines, m.lines);
+    state.msg = { title: list[0].title, lines, then }; state.screen = "msg";
+  }
+  function openTreasureDig(id) {
+    const def = {
+      id: "dig", title: "X Marks the Spot",
+      text: "You put boats ashore and dig where the inked cross lies…",
+      options: [{ label: "Dig", effect: () => { const r = completeQuest(id, ["Spades bite sand — then strike a rotten chest packed with coin!"]); return { lines: r ? r.lines : ["Nothing but sand and crabs."] }; } }],
+    };
+    openEvent(def);
   }
 
   // ---------------------------------------------------------------------------
@@ -223,12 +363,23 @@
   // ---------------------------------------------------------------------------
   function makeBattleShip(shipClassKey, isPlayer, areas, crewCount, gunnery) {
     const sc = D.SHIP_CLASSES[shipClassKey];
+    // One cannon per gun slot per side. `slot` is the 0-based index within its
+    // side (used to knock out the highest guns as the gun-deck takes damage).
+    const cannons = [];
+    let id = 0;
+    for (const side of ["port", "star"]) {
+      for (let s = 0; s < sc.gunsPerSide; s++) {
+        // Enemy cannons come pre-manned by a synthetic gunner of the ship's
+        // gunnery skill; the player's are assigned from the crew roster.
+        const gunner = isPlayer ? null : { name: "gun crew", skills: { gunnery: gunnery || 1 }, _npc: true };
+        cannons.push({ id: id++, side, slot: s, gunner, reload: rand(0, T.reloadBase), reloadMax: T.reloadBase, loaded: false });
+      }
+    }
     return {
       isPlayer, sc, areas: areas || freshAreas(),
       x: 0, y: 0, heading: 0, speed: 0, sailLevel: 1,
       water: 0, crew: crewCount, gunnery: gunnery || 1,
-      reloadPort: rand(0, sc && sc.gunRange ? 1.5 : 1.5), reloadStar: rand(0, 1.5),
-      surrendered: false, sunk: false,
+      cannons, surrendered: false, sunk: false,
     };
   }
 
@@ -240,32 +391,96 @@
     enemy.x = T.arenaW * 0.68; enemy.y = T.arenaH * 0.32; enemy.heading = Math.PI * 0.8;
     enemy.aggression = tmpl.aggression;
 
-    // Default crew assignment across stations (rest held in reserve for boarding).
-    const ideal = player.sc.crewIdeal;
-    const st = { guns: Math.min(ideal, state.run.crew.length), sails: 0, helm: 0, pumps: 0 };
-    let left = state.run.crew.length - st.guns;
-    st.sails = Math.min(ideal, left); left -= st.sails;
-    st.helm = Math.min(1, left); left -= st.helm;
-
     state.battle = {
       node, tmpl, player, enemy,
-      stations: st,
+      stationCrew: { helm: [], sails: [], pumps: [] }, sel: null,
       shot: "round", target: "hull",
       paused: false, windDir: rand(-Math.PI, Math.PI),
       boarding: null, log: [], outcome: null, time: 0,
     };
+    assignStartingPosts(state.battle);
     state.screen = "battle";
   }
 
   function crewAlive() { return state.run.crew.length; }
-  function stationEff(key) {
-    const b = state.battle;
-    const ideal = b.player.sc.crewIdeal;
-    return clamp((b.stations[key] || 0) / ideal, 0, 1.5);
+
+  // --- Crew posts (per-cannon gunners + helm/sails/pumps) --------------------
+  function operationalPerSide(ship) {
+    return Math.max(0, Math.ceil(ship.sc.gunsPerSide * ship.areas.guns / T.areaMax));
   }
-  function reserveCount() {
-    const b = state.battle, s = b.stations;
-    return crewAlive() - (s.guns + s.sails + s.helm + s.pumps);
+  function cannonOnline(cn, ship) { return cn.slot < operationalPerSide(ship); }
+
+  function assignStartingPosts(b) {
+    b.stationCrew = { helm: [], sails: [], pumps: [] };
+    for (const cn of b.player.cannons) cn.gunner = null;
+    const crew = state.run.crew.slice();
+    if (crew.length) b.stationCrew.helm.push(crew.shift());
+    if (crew.length) b.stationCrew.sails.push(crew.shift());
+    // Best gunners to the guns, interleaving sides so both batteries have some
+    // guns manned by default (port slot0, star slot0, port slot1, …).
+    crew.sort((a, z) => (z.skills.gunnery || 0) - (a.skills.gunnery || 0));
+    const order = [];
+    for (let s = 0; s < b.player.sc.gunsPerSide; s++)
+      for (const side of ["port", "star"]) {
+        const cn = b.player.cannons.find((c) => c.side === side && c.slot === s);
+        if (cn) order.push(cn);
+      }
+    for (const cn of order) {
+      if (!crew.length) break;
+      if (cannonOnline(cn, b.player)) cn.gunner = crew.shift();
+    }
+    // Anyone left is in reserve (unassigned) for boarding / crisis response.
+  }
+  function unassign(c) {
+    const b = state.battle; if (!b) return;
+    for (const cn of b.player.cannons) if (cn.gunner === c) cn.gunner = null;
+    for (const k of ["helm", "sails", "pumps"]) {
+      const a = b.stationCrew[k], i = a.indexOf(c);
+      if (i >= 0) a.splice(i, 1);
+    }
+  }
+  function assignTo(c, post) {
+    const b = state.battle;
+    unassign(c);
+    if (post.type === "cannon") {
+      if (post.cannon.gunner) unassign(post.cannon.gunner);   // bump the old gunner to reserve
+      post.cannon.gunner = c;
+    } else if (post.type !== "reserve") {
+      b.stationCrew[post.type].push(c);
+    }
+  }
+  function crewPostLabel(c) {
+    const b = state.battle;
+    for (const cn of b.player.cannons) if (cn.gunner === c)
+      return (cn.side === "port" ? "P" : "S") + (cn.slot + 1);
+    for (const k of ["helm", "sails", "pumps"]) if (b.stationCrew[k].indexOf(c) >= 0)
+      return k === "helm" ? "Helm" : k === "sails" ? "Sails" : "Pumps";
+    return "—";
+  }
+  function assignedSet() {
+    const b = state.battle, s = new Set();
+    for (const cn of b.player.cannons) if (cn.gunner) s.add(cn.gunner);
+    for (const k of ["helm", "sails", "pumps"]) for (const c of b.stationCrew[k]) s.add(c);
+    return s;
+  }
+  function reserveCount() { const s = assignedSet(); return state.run.crew.filter((c) => !s.has(c)).length; }
+  // helm/sails/pumps effectiveness: manning vs ideal, lightly weighted by skill.
+  function postEff(key) {
+    const b = state.battle, ideal = b.player.sc.crewIdeal;
+    const crew = b.stationCrew[key] || [];
+    const skillKey = key === "pumps" ? "repair" : "sailing";
+    const avgSk = crew.length ? crew.reduce((s, c) => s + (c.skills[skillKey] || 0), 0) / crew.length : 0;
+    return clamp(crew.length / ideal, 0, 1.5) * (1 + 0.05 * avgSk);
+  }
+  // Remove one hand (a casualty) and clear any post they held.
+  function killCrew() {
+    const c = state.run.crew.pop();
+    if (!c) return;
+    if (state.battle) { unassign(c); if (state.battle.sel === c) state.battle.sel = null; }
+  }
+  function applyCasualty(defender) {
+    if (defender.isPlayer) killCrew();
+    else defender.crew = Math.max(0, defender.crew - 1);
   }
 
   function windFactor(heading, windDir) {
@@ -284,34 +499,71 @@
     return ship.sc.maxSpeed * (0.35 + 0.65 * mast) * windFactor(ship.heading, windDir) * sailEff * mult;
   }
 
-  function fireBroadside(attacker, defender, side, b, gunnerySkill) {
-    const cond = attacker.areas.guns / T.areaMax;
-    const nShots = Math.max(1, Math.round(attacker.sc.gunsPerSide * cond));
-    const shotKind = attacker.isPlayer ? D.SHOT_TYPES[b.shot] : D.SHOT_TYPES.round;
+  const cannonSkill = (cn) => (cn.gunner ? (cn.gunner.skills.gunnery || 0) : 0);
+  function cannonReloadTime(cn, isPlayer) {
+    let mult = 1;
+    if (isPlayer && state.run.captain && D.CAPTAIN_TRAITS[state.run.captain].perk.reloadMult)
+      mult = D.CAPTAIN_TRAITS[state.run.captain].perk.reloadMult;
+    return (T.reloadBase * mult) / (0.6 + T.gunnerReloadK * cannonSkill(cn));
+  }
+  // A manned, online cannon loads over its own reload time; unmanned or
+  // knocked-out guns never load. No auto-fire — loading only readies the gun.
+  function tickCannons(ship, dt) {
+    for (const cn of ship.cannons) {
+      if (!cn.gunner || !cannonOnline(cn, ship)) { cn.loaded = false; continue; }
+      if (!cn.loaded) { cn.reload -= dt; if (cn.reload <= 0) { cn.reload = 0; cn.loaded = true; } }
+    }
+  }
+  function sideLoaded(ship, side) {
+    return ship.cannons.filter((cn) => cn.side === side && cn.loaded && cn.gunner && cannonOnline(cn, ship)).length;
+  }
+  // Discharge every loaded cannon on `side`. They only HIT if that side bears
+  // (target within the broadside arc) and is in range — firing out of arc just
+  // wastes the load. Each cannon rolls accuracy from its own gunner's skill.
+  function fireSide(attacker, defender, side, b) {
     const targetArea = attacker.isPlayer ? b.target : "hull";
+    const shotKind = attacker.isPlayer ? D.SHOT_TYPES[b.shot] : D.SHOT_TYPES.round;
     const range = dist(attacker, defender);
+    const inRange = range <= attacker.sc.gunRange;
+    const bears = bearingSide(attacker, defender) === side;
     const rangeFrac = clamp(range / attacker.sc.gunRange, 0, 1);
     const motionFrac = clamp(defender.speed / defender.sc.maxSpeed, 0, 1);
-    let acc = T.accuracyBase
-      * (1 - rangeFrac * T.accuracyRangeFalloff)
-      * (1 - motionFrac * T.accuracyMotionPenalty)
-      * (1 + 0.05 * gunnerySkill);
-    acc = clamp(acc, 0.05, 0.96);
-    let hits = 0;
-    for (let i = 0; i < nShots; i++) if (Math.random() < acc) hits++;
+    let hits = 0, fired = 0;
+    for (const cn of attacker.cannons) {
+      if (cn.side !== side || !cn.loaded || !cn.gunner || !cannonOnline(cn, attacker)) continue;
+      fired++;
+      cn.loaded = false;
+      cn.reloadMax = cannonReloadTime(cn, attacker.isPlayer);
+      cn.reload = cn.reloadMax;
+      if (attacker.isPlayer && !cn.gunner._npc)
+        cn.gunner.skills.gunnery = Math.min(T.skillMax, (cn.gunner.skills.gunnery || 0) + T.gunneryXpPerFire);
+      if (!bears || !inRange) continue;   // fired, but no arc/range → all miss
+      let acc = T.accuracyBase * (1 - rangeFrac * T.accuracyRangeFalloff)
+        * (1 - motionFrac * T.accuracyMotionPenalty) * (1 + T.gunnerAccK * cannonSkill(cn));
+      if (Math.random() < clamp(acc, 0.05, 0.96)) hits++;
+    }
+    if (fired === 0) return 0;
+    const who = attacker.isPlayer ? "Your" : "Enemy";
     if (hits > 0) {
       const dmg = hits * shotKind.base * (shotKind.bias[targetArea] || 0.7);
       defender.areas[targetArea] = Math.max(0, defender.areas[targetArea] - dmg);
-      // Casualties (deck rakings especially) thin the defender's crew.
       const casChance = shotKind.casualty * (targetArea === "deck" ? 1.5 : 1) * hits * 0.5;
-      if (Math.random() < casChance && defender.crew > 0) {
-        defender.crew -= 1;
-        if (defender.isPlayer && state.run.crew.length > 0) state.run.crew.pop();
-      }
-      b.log.unshift((attacker.isPlayer ? "You rake" : "They rake") + " the " + targetArea +
-        " — " + hits + " hit" + (hits > 1 ? "s" : ""));
-      if (b.log.length > 4) b.log.pop();
+      if (Math.random() < casChance) applyCasualty(defender);
+      b.log.unshift(who + " " + side + " battery: " + hits + "/" + fired + " into the " + targetArea);
+    } else {
+      b.log.unshift(who + " " + side + " battery: " + fired + " fired, " + (bears && inRange ? "all missed" : "none bore"));
     }
+    if (b.log.length > 4) b.log.pop();
+    return fired;
+  }
+  // Player fire order (F key / FIRE buttons). Never automatic.
+  function firePlayer(side) {
+    const b = state.battle, p = b.player, e = b.enemy;
+    if (!b || b.boarding || b.outcome || e.sunk) return;
+    side = side || bearingSide(p, e);
+    if (!side) { b.flash = "No guns bear — turn to bring a broadside about!"; b.flashT = 1.6; return; }
+    if (sideLoaded(p, side) === 0) { b.flash = "No loaded guns on the " + side + " side."; b.flashT = 1.4; return; }
+    fireSide(p, e, side, b);
   }
 
   function bearingSide(attacker, defender) {
@@ -333,7 +585,7 @@
     const p = b.player, e = b.enemy;
 
     // --- Player movement (held keys) ---
-    const helmEff = 0.5 + 0.5 * stationEff("helm");
+    const helmEff = 0.5 + 0.5 * postEff("helm");
     const rudder = p.areas.rudder / T.areaMax;
     const turn = p.sc.turnRate * helmEff * (0.3 + 0.7 * rudder);
     if (keys.has("ArrowLeft") || keys.has("a")) p.heading = normAngle(p.heading - turn * dt);
@@ -341,25 +593,15 @@
     if (consumePress("ArrowUp") || consumePress("w")) p.sailLevel = clamp(p.sailLevel + 0.25, 0, 1);
     if (consumePress("ArrowDown") || consumePress("s")) p.sailLevel = clamp(p.sailLevel - 0.25, 0, 1);
 
-    const sailEffP = 0.55 + 0.45 * stationEff("sails");
+    const sailEffP = 0.55 + 0.45 * postEff("sails");
     stepShip(p, b.windDir, shipMaxSpeed(p, b.windDir, sailEffP) * p.sailLevel, dt);
 
     // Player pumps fight flooding.
-    const pumpPower = stationEff("pumps") * T.pumpRate;
-    updateFlooding(p, pumpPower, dt);
+    updateFlooding(p, postEff("pumps") * T.pumpRate, dt);
 
-    // Player guns auto-fire when a broadside bears, in range, and reloaded.
-    p.reloadPort -= dt; p.reloadStar -= dt;
-    const gunnery = 1 + avgSkill(state.run.crew, "gunnery");
-    let reloadMult = 1;
-    if (state.run.captain && D.CAPTAIN_TRAITS[state.run.captain].perk.reloadMult)
-      reloadMult = D.CAPTAIN_TRAITS[state.run.captain].perk.reloadMult;
-    const reloadTime = (T.reloadBase * reloadMult) / (0.5 + stationEff("guns"));
-    if (!e.sunk && dist(p, e) <= p.sc.gunRange) {
-      const side = bearingSide(p, e);
-      if (side === "port" && p.reloadPort <= 0) { fireBroadside(p, e, side, b, gunnery); p.reloadPort = reloadTime; }
-      if (side === "star" && p.reloadStar <= 0) { fireBroadside(p, e, side, b, gunnery); p.reloadStar = reloadTime; }
-    }
+    // Player cannons load on their own; firing happens only on the player's
+    // order (F key / FIRE buttons) — never automatically.
+    tickCannons(p, dt);
 
     // --- Enemy AI ---
     if (!e.surrendered) updateEnemyAI(e, p, b, dt);
@@ -414,12 +656,15 @@
     else if (desiredRel < -0.05) e.heading = normAngle(e.heading - Math.min(turn * dt, -desiredRel));
     stepShip(e, b.windDir, shipMaxSpeed(e, b.windDir, 0.9) * (0.5 + 0.5 * e.aggression), dt);
 
-    e.reloadPort -= dt; e.reloadStar -= dt;
-    const reloadTime = T.reloadBase / (0.5 + 1.0);   // enemy at ~ideal manning
+    // Enemy cannons load on their own; the AI captain fires a side once at
+    // least half its bearing guns are loaded (this is AI, not player auto-fire).
+    tickCannons(e, dt);
     if (range <= e.sc.gunRange) {
       const side = bearingSide(e, p);
-      if (side === "port" && e.reloadPort <= 0) { fireBroadside(e, p, side, b, e.gunnery); e.reloadPort = reloadTime; }
-      if (side === "star" && e.reloadStar <= 0) { fireBroadside(e, p, side, b, e.gunnery); e.reloadStar = reloadTime; }
+      if (side) {
+        const ops = operationalPerSide(e), loaded = sideLoaded(e, side);
+        if (loaded > 0 && loaded >= Math.ceil(ops / 2)) fireSide(e, p, side, b);
+      }
     }
   }
 
@@ -456,7 +701,7 @@
     const pLoss = T.boardLethality * bd.eStr / adv;
     bd.eCasualty += eLoss; bd.pCasualty += pLoss;
     while (bd.eCasualty >= 1 && b.enemy.crew > 0) { b.enemy.crew--; bd.eCasualty -= 1; }
-    while (bd.pCasualty >= 1 && state.run.crew.length > 0) { state.run.crew.pop(); bd.pCasualty -= 1; }
+    while (bd.pCasualty >= 1 && state.run.crew.length > 0) { killCrew(); bd.pCasualty -= 1; }
     if (b.enemy.crew <= 0) { bd.done = true; bd.result = "captured"; endBattle("captured"); }
     else if (crewAlive() <= 0) { bd.done = true; bd.result = "wiped"; endBattle("lost"); }
   }
@@ -490,6 +735,10 @@
       return;
     }
     if (b.enemy.surrendered && kind === "sunk") lines.push("(They had struck — boarding would have paid more.)");
+    // Faction consequences + any bounty on this foe.
+    applyEnemyRep(tmpl);
+    if (tmpl.faction === "navy") lines.push("Word spreads: the brethren toast you; the Crown does not.");
+    for (const bq of checkBountyQuests(tmpl.key)) lines.push.apply(lines, bq.lines);
     state.run.gold += gold; state.run.supplies += supplies;
     // Bail out water once safe; area damage persists until a shipwright.
     b.player.water = 0; state.run.areas = b.player.areas;
@@ -518,7 +767,7 @@
       const miss = T.areaMax - a[ar.key];
       cost += miss * (ar.key === "hull" ? D.PORT.repairHullPerPoint : D.PORT.repairPerPoint);
     }
-    return Math.round(cost);
+    return Math.round(cost * priceMult());
   }
 
   // ---------------------------------------------------------------------------
@@ -606,6 +855,10 @@
           ctx.strokeStyle = (n.id === m.current) ? C.hi : "rgba(0,0,0,0.4)"; ctx.stroke();
           const label = !revealed ? "?" : (n.type === "port" ? "⚓ " : n.type === "enemy" ? "⚔ " : "") + n.name;
           text(label, n.x, n.y + 34, 14, revealed ? C.text : C.dim, "center");
+          // Quest marker: treasure target node, or a delivery's destination port.
+          const isQuestNode = n.quest ||
+            (n.type === "port" && state.run.quests.some((id) => D.QUESTS[id].type === "delivery" && D.QUESTS[id].targetPort === n.name));
+          if (isQuestNode) text("✦", n.x, n.y - 22, 20, C.gold, "center");
           if (adj && inRect(n.x - r, n.y - r, r * 2, r * 2)) {
             ctx.beginPath(); ctx.arc(n.x, n.y, r + 5, 0, TAU); ctx.strokeStyle = C.hi; ctx.lineWidth = 2; ctx.stroke();
             if (mouse.clicked) { mouse.clicked = false; sailTo(n.id); }
@@ -636,6 +889,33 @@
         text(m.title, W / 2, 250, 28, C.hi, "center", "bold");
         let y = 295; for (const l of m.lines) { wrap(l, W / 2 - 250, y, 500, 22, 17, C.text, "center"); y += 30; }
         if (button(W / 2 - 80, 350, 160, 40, "Onward")) { const f = m.then; state.msg = null; f(); }
+      },
+    },
+
+    // --- Branching sea event ---
+    event: {
+      update() {},
+      render() {
+        drawSeaBg();
+        const ev = state.event, def = ev.def;
+        panel(W / 2 - 320, 90, 640, 420);
+        text(def.title, W / 2, 140, 30, C.hi, "center", "bold");
+        if (ev.phase === "choose") {
+          const yEnd = wrap(def.text, W / 2 - 290, 180, 580, 24, 18, C.text, "center");
+          let y = yEnd + 40;
+          const H = eventAPI();
+          for (const opt of def.options) {
+            const ok = !opt.req || opt.req(state.run, H);
+            if (button(W / 2 - 260, y, 520, 40, opt.label, { disabled: !ok, bg: C.panelLt, hover: "#27506a" })) {
+              if (ok) resolveEventOption(opt);
+            }
+            if (!ok && opt.reqText) text("(" + opt.reqText + ")", W / 2 + 250, y + 25, 12, C.danger, "right", "italic");
+            y += 50;
+          }
+        } else {
+          let y = 200; for (const l of ev.result.lines) y = wrap(l, W / 2 - 290, y, 580, 24, 18, C.text, "center") + 30;
+          if (button(W / 2 - 90, 440, 180, 42, ev.result.battle ? "To arms!" : "Onward", { bg: C.wood, hover: "#855c33" })) finishEvent();
+        }
       },
     },
 
@@ -778,73 +1058,108 @@
     return yy;
   }
 
+  function drawBattery(side, x, y, w) {
+    const b = state.battle, p = b.player;
+    const bears = bearingSide(p, b.enemy) === side;
+    const n = p.sc.gunsPerSide, sw = Math.min(24, (w - 4) / n);
+    text(side === "port" ? "Port" : "Star", x, y + 12, 12, bears ? C.hi : C.dim, "left", bears ? "bold" : "");
+    let gx = x + 40;
+    for (const cn of p.cannons.filter((c) => c.side === side)) {
+      const online = cannonOnline(cn, p);
+      const bx = gx, by = y, bw = sw - 3, bh = 16;
+      if (!online) { ctx.fillStyle = "#242424"; rrect(bx, by, bw, bh, 3); ctx.fill(); }
+      else if (!cn.gunner) {
+        ctx.strokeStyle = "rgba(255,255,255,0.3)"; rrect(bx, by, bw, bh, 3); ctx.stroke();
+      } else if (cn.loaded) {
+        ctx.fillStyle = C.green; rrect(bx, by, bw, bh, 3); ctx.fill();
+      } else {
+        ctx.fillStyle = "#0a1620"; rrect(bx, by, bw, bh, 3); ctx.fill();
+        const f = clamp(1 - cn.reload / (cn.reloadMax || 1), 0, 1);
+        ctx.fillStyle = C.gold; rrect(bx, by, Math.max(2, bw * f), bh, 3); ctx.fill();
+      }
+      if (cn.gunner === b.sel) { ctx.strokeStyle = C.hi; ctx.lineWidth = 2; rrect(bx, by, bw, bh, 3); ctx.stroke(); }
+      if (inRect(bx, by, bw, bh) && mouse.clicked) {
+        mouse.clicked = false;
+        if (b.sel && online) { assignTo(b.sel, { type: "cannon", cannon: cn }); b.sel = null; }
+        else if (cn.gunner && !cn.gunner._npc) assignTo(cn.gunner, { type: "reserve" });
+      }
+      gx += sw;
+    }
+    if (button(x + 40 + n * sw + 6, y - 1, 74, 18, "FIRE", { size: 12, bg: bears && sideLoaded(p, side) ? "#7a3d2a" : C.panelLt, hover: "#9a4d34" }))
+      firePlayer(side);
+  }
+
   function renderBattleHUD() {
     const b = state.battle, p = b.player, e = b.enemy;
     panel(0, HUD_TOP, W, H - HUD_TOP, C.panel);
+    const y0 = HUD_TOP;
 
-    // Left: own ship
-    text("YOUR " + p.sc.name.toUpperCase(), 16, HUD_TOP + 24, 15, C.hi, "left", "bold");
-    text("Crew " + crewAlive(), 200, HUD_TOP + 24, 14, C.text);
-    areaBars(16, HUD_TOP + 44, p.areas, false);
-    text("Water", 16, HUD_TOP + 142, 13, C.text);
-    bar(76, HUD_TOP + 132, 90, 10, p.water / T.floodSink, C.blue);
+    // --- Col 1: your ship ---
+    text("YOUR " + p.sc.name.toUpperCase(), 10, y0 + 20, 14, C.hi, "left", "bold");
+    text("Sail " + Math.round(p.sailLevel * 100) + "%", 128, y0 + 20, 12, C.dim);
+    areaBars(10, y0 + 40, p.areas, false);
+    text("Water", 10, y0 + 148, 12, C.text);
+    bar(70, y0 + 139, 96, 9, p.water / T.floodSink, C.blue);
 
-    // Middle: stations
-    const mx = 250;
-    text("CREW STATIONS", mx, HUD_TOP + 24, 15, C.hi, "left", "bold");
-    text("Reserve " + reserveCount(), mx + 165, HUD_TOP + 24, 13, C.dim);
-    let sy = HUD_TOP + 40;
-    for (const st of D.STATIONS) {
-      text(st.label, mx, sy + 13, 14, C.text);
-      const assigned = b.stations[st.key] || 0;
-      if (button(mx + 70, sy, 22, 18, "–", { size: 14 })) {
-        if (assigned > 0) b.stations[st.key]--;
-      }
-      text(String(assigned), mx + 100, sy + 14, 15, C.text, "center");
-      if (button(mx + 112, sy, 22, 18, "+", { size: 14, disabled: reserveCount() <= 0 })) {
-        if (reserveCount() > 0) b.stations[st.key]++;
-      }
-      bar(mx + 144, sy + 4, 70, 10, stationEff(st.key) / 1.5, C.blue);
-      sy += 23;
+    // --- Col 2: crew roster + station assignment ---
+    const cx = 196;
+    text("CREW — click to select", cx, y0 + 18, 13, C.hi, "left", "bold");
+    text("Reserve " + reserveCount(), cx + 165, y0 + 18, 12, C.dim);
+    const shown = Math.min(6, state.run.crew.length);
+    for (let r = 0; r < shown; r++) {
+      const c = state.run.crew[r], ry = y0 + 28 + r * 16;
+      const seld = b.sel === c;
+      if (inRect(cx, ry, 244, 15)) { ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fillRect(cx, ry, 244, 15); if (mouse.clicked) { mouse.clicked = false; b.sel = seld ? null : c; } }
+      if (seld) { ctx.strokeStyle = C.hi; ctx.lineWidth = 1; ctx.strokeRect(cx, ry, 244, 15); }
+      const nm = c.name.length > 17 ? c.name.slice(0, 16) + "…" : c.name;
+      text((seld ? "▸ " : "") + nm, cx + 4, ry + 12, 12, seld ? C.hi : C.text);
+      text("G" + Math.round(c.skills.gunnery || 0), cx + 176, ry + 12, 11, C.dim);
+      text(crewPostLabel(c), cx + 206, ry + 12, 11, C.gold);
     }
-    text("Sail " + Math.round(p.sailLevel * 100) + "%   (↑/↓ keys)", mx, sy + 14, 13, C.dim);
+    if (state.run.crew.length > shown) text("+" + (state.run.crew.length - shown) + " more (win/lose hands to see)", cx, y0 + 28 + shown * 16 + 10, 10, C.dim);
+    // Assign-selected-to buttons
+    const ays = y0 + 130; let abx = cx;
+    for (const [type, label] of [["helm", "Helm"], ["sails", "Sails"], ["pumps", "Pumps"], ["reserve", "Reserve"]]) {
+      if (button(abx, ays, 58, 20, label, { size: 11, disabled: !b.sel, bg: C.panelLt })) { if (b.sel) { assignTo(b.sel, { type }); b.sel = null; } }
+      abx += 61;
+    }
+    text(b.sel ? "Now click a gun slot or a station to post " + b.sel.name.split(" ")[0] : "Select a hand, then a gun/station.", cx, ays + 32, 11, C.dim, "left", "italic");
 
-    // Right: enemy + orders
-    const rx = 500;
-    text("ENEMY " + e.sc.name.toUpperCase(), rx, HUD_TOP + 24, 15, C.red, "left", "bold");
-    text("Crew " + e.crew + (e.surrendered ? " (struck!)" : ""), rx + 180, HUD_TOP + 24, 13, e.surrendered ? C.gold : C.dim);
-    text("Target ↓ (click)", rx, HUD_TOP + 40, 12, C.dim);
-    areaBars(rx, HUD_TOP + 56, e.areas, true);
-
-    // Shot type selector
-    const sx = 658; let i = 0;
-    text("SHOT", sx, HUD_TOP + 40, 12, C.dim);
+    // --- Col 3: batteries, shot, fire ---
+    const bx = 452;
+    text("BATTERIES", bx, y0 + 18, 13, C.hi, "left", "bold");
+    text("F fires the bearing side", bx + 96, y0 + 18, 11, C.dim);
+    drawBattery("port", bx, y0 + 30, 250);
+    drawBattery("star", bx, y0 + 54, 250);
+    let si = 0;
     for (const k of Object.keys(D.SHOT_TYPES)) {
-      const sel = b.shot === k;
-      if (button(sx, HUD_TOP + 48 + i * 24, 145, 20, D.SHOT_TYPES[k].label, { size: 13, bg: sel ? "#2c5a3a" : C.panelLt }))
-        b.shot = k;
-      i++;
+      if (button(bx + si * 84, y0 + 82, 80, 20, D.SHOT_TYPES[k].label, { size: 12, bg: b.shot === k ? "#2c5a3a" : C.panelLt })) b.shot = k;
+      si++;
     }
-    text(D.SHOT_TYPES[b.shot].desc, sx, HUD_TOP + 132, 12, C.dim, "left", "italic");
+    text(D.SHOT_TYPES[b.shot].desc, bx, y0 + 120, 11, C.dim, "left", "italic");
+    const bs = bearingSide(p, e);
+    text(bs ? "▶ " + bs + " battery bears" : "turn to bring guns to bear", bx, y0 + 140, 12, bs ? C.green : C.dim, "left", bs ? "bold" : "italic");
 
-    // Board + pause buttons (own column, clear of the shot selector)
-    const actX = 812;
+    // --- Col 4: enemy, target, board, pause ---
+    const ex = 710;
+    text("ENEMY " + e.sc.name.toUpperCase(), ex, y0 + 18, 13, C.red, "left", "bold");
+    text("Crew " + e.crew + (e.surrendered ? " struck!" : ""), ex, y0 + 34, 12, e.surrendered ? C.gold : C.dim);
     const closeEnough = dist(p, e) <= T.grappleRange && !e.sunk;
-    if (button(actX, HUD_TOP + 48, 130, 34, "BOARD (B)", { bg: closeEnough ? "#7a3d2a" : "#3a2a22", hover: "#9a4d34", disabled: !closeEnough }))
-      tryBoard();
-    if (button(actX, HUD_TOP + 90, 130, 26, b.paused ? "▶ Resume" : "❚❚ Pause", { size: 13 }))
-      b.paused = !b.paused;
-    text(closeEnough ? "alongside!" : "close to grapple", actX + 65, HUD_TOP + 132, 11, closeEnough ? C.green : C.dim, "center", "italic");
+    if (button(ex + 120, y0 + 6, 118, 26, closeEnough ? "BOARD (B)" : "board…", { size: 13, bg: closeEnough ? "#7a3d2a" : "#3a2a22", hover: "#9a4d34", disabled: !closeEnough })) tryBoard();
+    if (button(ex + 120, y0 + 36, 118, 22, b.paused ? "▶ Resume" : "❚❚ Pause", { size: 12 })) b.paused = !b.paused;
+    text("Target ↓ (click a bar)", ex, y0 + 52, 11, C.dim);
+    areaBars(ex, y0 + 68, e.areas, true);
 
     // Hotkeys
     if (consumePress(" ")) b.paused = !b.paused;
     if (consumePress("1")) b.shot = "round";
     if (consumePress("2")) b.shot = "chain";
     if (consumePress("3")) b.shot = "grape";
+    if (consumePress("f") || consumePress("F")) firePlayer(null);
     if (consumePress("b") || consumePress("B")) tryBoard();
 
-    if (b.paused) text("— PAUSED —", W / 2, HUD_TOP - 10, 18, C.hi, "center", "bold");
-    if (b.flashT > 0) { b.flashT -= 0.02; text(b.flash, W / 2, HUD_TOP + 150, 15, C.danger, "center", "bold"); }
+    if (b.paused) text("— PAUSED (orders still take —", W / 2, HUD_TOP - 8, 16, C.hi, "center", "bold");
+    if (b.flashT > 0) { b.flashT -= 0.02; text(b.flash, W / 2, HUD_TOP - 8, 15, C.danger, "center", "bold"); }
   }
 
   function renderBoardingOverlay() {
@@ -880,23 +1195,32 @@
     drawSeaBg();
     const r = state.run, P = state.port;
     panel(20, 20, W - 40, 70);
-    text("⚓ " + nodeById(state.map.current).name, 40, 64, 30, C.hi, "left", "bold");
-    text("Gold " + r.gold, W - 360, 50, 18, C.gold, "left", "bold");
-    text("Supplies " + r.supplies, W - 360, 76, 16, C.text);
-    text("Crew " + r.crew.length + "/" + D.SHIP_CLASSES[r.shipClass].crewCap, W - 200, 50, 18, C.text);
+    text("⚓ " + nodeById(state.map.current).name, 40, 54, 26, C.hi, "left", "bold");
+    // Reputation with the three powers.
+    let rxp = 40;
+    for (const f of Object.keys(D.FACTIONS)) {
+      const v = r.rep[f] || 0;
+      text(D.FACTIONS[f].label + " " + (v > 0 ? "+" : "") + v, rxp, 80, 13, v > 4 ? C.green : v < -4 ? C.danger : C.dim);
+      rxp += ctx.measureText(D.FACTIONS[f].label + " " + v).width + 28;
+    }
+    text("Gold " + r.gold, W - 360, 48, 18, C.gold, "left", "bold");
+    text("Supplies " + r.supplies, W - 360, 74, 15, C.text);
+    text("Crew " + r.crew.length + "/" + D.SHIP_CLASSES[r.shipClass].crewCap, W - 200, 48, 18, C.text);
+    if (priceMult() !== 1) text((priceMult() < 1 ? "Goodwill: prices down" : "Distrust: prices up"), W - 200, 74, 13, priceMult() < 1 ? C.green : C.danger);
 
     // tabs
-    const tabs = [["yard", "Shipwright"], ["tavern", "Tavern"], ["market", "Market"]];
+    const tabs = [["yard", "Shipwright"], ["tavern", "Tavern"], ["market", "Market"], ["rumors", "Rumours"]];
     let tx = 40;
     for (const [k, label] of tabs) {
-      if (button(tx, 110, 150, 38, label, { bg: P.tab === k ? C.wood : C.panelLt, hover: "#855c33" })) P.tab = k;
-      tx += 162;
+      if (button(tx, 110, 138, 38, label, { bg: P.tab === k ? C.wood : C.panelLt, hover: "#855c33" })) P.tab = k;
+      tx += 148;
     }
 
     panel(40, 165, W - 80, 330);
     if (P.tab === "yard") renderYard();
     else if (P.tab === "tavern") renderTavern();
-    else renderMarket();
+    else if (P.tab === "market") renderMarket();
+    else renderRumors();
 
     if (button(40, H - 56, 150, 40, "⛵ Set Sail", { bg: C.wood, hover: "#855c33" })) { state.screen = "map"; save(); }
     if (r.gold >= D.PORT.retireGold) {
@@ -941,9 +1265,10 @@
     for (const s of D.SKILLS) { text(s + ": " + c.skills[s], 90, sy, 14, C.text); sy += 20; }
     const cap = D.SHIP_CLASSES[r.shipClass].crewCap;
     const full = r.crew.length >= cap;
-    const can = r.gold >= D.PORT.recruitCost && !full;
-    if (button(70, 440, 175, 40, "Sign on — " + D.PORT.recruitCost + " gold", { disabled: !can, bg: can ? "#2c5a3a" : undefined, hover: "#3f8a4f" })) {
-      r.gold -= D.PORT.recruitCost; r.crew.push(c); P.recruit = makeCrew({}); save();
+    const recruitCost = Math.round(D.PORT.recruitCost * priceMult());
+    const can = r.gold >= recruitCost && !full;
+    if (button(70, 440, 175, 40, "Sign on — " + recruitCost + " gold", { disabled: !can, bg: can ? "#2c5a3a" : undefined, hover: "#3f8a4f" })) {
+      r.gold -= recruitCost; r.crew.push(c); P.recruit = makeCrew({}); save();
     }
     if (button(255, 440, 130, 40, "See another", {})) P.recruit = makeCrew({});
     if (full) text("Your ship is at full complement (" + cap + ").", 460, 260, 15, C.danger);
@@ -959,30 +1284,60 @@
   function renderMarket() {
     const r = state.run;
     text("Provisions", 70, 205, 20, C.text, "left", "bold");
-    const can5 = r.gold >= D.PORT.supplyCost * 5;
-    if (button(70, 220, 240, 38, "Buy 5 supplies — " + D.PORT.supplyCost * 5 + " gold", { disabled: !can5, bg: can5 ? C.panelLt : undefined })) {
-      if (can5) { r.gold -= D.PORT.supplyCost * 5; r.supplies += 5; save(); }
+    const supply5 = Math.round(D.PORT.supplyCost * 5 * priceMult());
+    const can5 = r.gold >= supply5;
+    if (button(70, 220, 240, 38, "Buy 5 supplies — " + supply5 + " gold", { disabled: !can5, bg: can5 ? C.panelLt : undefined })) {
+      if (can5) { r.gold -= supply5; r.supplies += 5; save(); }
     }
 
     text("Arm your crew (boarding gear)", 70, 295, 20, C.text, "left", "bold");
     let x = 70;
     for (const wk of D.PORT.weaponStock) {
       const wp = D.WEAPONS[wk];
+      const cost = Math.round(wp.cost * priceMult());
       panel(x, 315, 150, 120, C.panelLt);
       text(wp.label, x + 75, 345, 16, C.hi, "center", "bold");
       text("+" + wp.melee + " melee", x + 75, 370, 14, C.gold, "center");
-      text(wp.cost + " gold", x + 75, 392, 14, C.text, "center");
-      const can = r.gold >= wp.cost;
+      text(cost + " gold", x + 75, 392, 14, C.text, "center");
+      const can = r.gold >= cost;
       if (button(x + 15, 402, 120, 26, "Equip a hand", { size: 12, disabled: !can })) {
         // Equip the least-armed crew member.
         if (can) {
           const target = r.crew.slice().sort((a, b2) => D.WEAPONS[a.weapon].melee - D.WEAPONS[b2.weapon].melee)[0];
-          if (target) { target.weapon = wk; r.gold -= wp.cost; save(); }
+          if (target) { target.weapon = wk; r.gold -= cost; save(); }
         }
       }
       x += 165;
     }
     text("Equips your worst-armed hand. Better steel wins boarding fights.", 70, 460, 14, C.dim, "left", "italic");
+  }
+
+  function renderRumors() {
+    const r = state.run;
+    text("Rumours & Contracts", 70, 200, 20, C.text, "left", "bold");
+    // Available quests offered on this board.
+    let y = 226;
+    const offers = D.PORT_QUESTS.filter((id) => questReqMet(id));
+    if (!offers.length) text("No new contracts here for a captain of your standing.", 70, y, 15, C.dim, "left", "italic");
+    for (const id of offers) {
+      const q = D.QUESTS[id];
+      panel(64, y, W - 128, 66, C.panelLt);
+      text(q.title, 82, y + 24, 17, C.hi, "left", "bold");
+      text("(" + D.FACTIONS[q.faction].label + ")", 300, y + 24, 13, C.gold, "left", "italic");
+      wrap(q.blurb, 82, y + 44, W - 360, 16, 13, C.dim);
+      const rw = q.reward || {};
+      if (button(W - 210, y + 18, 130, 32, "Accept — " + (rw.gold || 0) + "g", { bg: "#2c5a3a", hover: "#3f8a4f", size: 13 })) { addQuest(id); }
+      y += 74;
+    }
+    // Active quest log.
+    y = Math.max(y, 360);
+    text("Your log", 70, y, 18, C.text, "left", "bold"); y += 24;
+    if (!r.quests.length) text("No active contracts.", 70, y, 14, C.dim, "left", "italic");
+    for (const id of r.quests) {
+      const q = D.QUESTS[id];
+      text("• " + q.title + " — " + q.log, 82, y, 14, C.text); y += 20;
+    }
+    if (r.questsDone.length) text("Completed: " + r.questsDone.length, 70, y + 6, 13, C.green);
   }
 
   // ---------------------------------------------------------------------------
@@ -1004,6 +1359,10 @@
 
   // Boot
   state = { screen: "title", run: null, map: null, battle: null };
-  window.BLACKTIDE = { get state() { return state; }, D };   // for debugging
+  // Debug/testing surface (harmless in play — nothing calls it automatically).
+  window.BLACKTIDE = {
+    get state() { return state; }, D,
+    api: { sailTo, openEvent, rollEvent, addQuest, buildPort, startBattle },
+  };
   requestAnimationFrame(frame);
 })();

@@ -43,13 +43,13 @@
     },
   };
 
-  // Battle crew stations the player distributes hands across. Each has an
-  // effectiveness curve driven by (assigned / ideal).
+  // Non-gun battle stations the player distributes hands across (cannons are
+  // manned individually — see the cannon model). Effectiveness is driven by
+  // (assigned / ideal), lightly weighted by the relevant skill.
   const STATIONS = [
-    { key: "guns",  label: "Guns",  desc: "More hands → faster reload" },
-    { key: "sails", label: "Sails", desc: "More hands → more speed" },
-    { key: "helm",  label: "Helm",  desc: "More hands → sharper turns" },
-    { key: "pumps", label: "Pumps", desc: "More hands → fight flooding" },
+    { key: "sails", label: "Sails", skill: "sailing", desc: "More/skilled hands → more speed" },
+    { key: "helm",  label: "Helm",  skill: "sailing", desc: "More/skilled hands → sharper turns" },
+    { key: "pumps", label: "Pumps", skill: "repair",  desc: "More/skilled hands → fight flooding" },
   ];
 
   const SKILLS = ["gunnery", "sailing", "repair", "melee", "medicine", "navigation"];
@@ -85,16 +85,132 @@
   // Enemy ship templates encountered in the slice.
   const ENEMIES = {
     merchant: {
-      key: "merchant", name: "Merchant Brig", shipClass: "brig",
+      key: "merchant", name: "Merchant Brig", shipClass: "brig", faction: "merchants",
       crew: 4, gunnery: 1, aggression: 0.35, gold: 120, supplies: 4,
       blurb: "Fat with cargo, light on fight. A pirate's bread and butter.",
     },
     cutter: {
-      key: "cutter", name: "Navy Cutter", shipClass: "sloop",
+      key: "cutter", name: "Navy Cutter", shipClass: "sloop", faction: "navy",
       crew: 9, gunnery: 3, aggression: 0.85, gold: 90, supplies: 2,
       blurb: "Fast and aggressive. The crown's hounds.",
     },
   };
+
+  // Factions track how the powers of the sea regard you. Deeds shift reputation;
+  // reputation colours prices, quest offers, and who comes hunting.
+  const FACTIONS = {
+    navy:      { key: "navy",      label: "The Crown's Navy", blurb: "Law and the gallows." },
+    merchants: { key: "merchants", label: "Merchant Guild",   blurb: "Coin, cargo, safe passage." },
+    brethren:  { key: "brethren",  label: "Pirate Brethren",  blurb: "The free companies of the account." },
+  };
+
+  // Branching sea events. `req`/`cond`/`effect` receive (run, H) where H is a
+  // helper bundle the engine supplies (see game.js eventAPI). `effect` returns
+  // { lines:[...], battle?:enemyKey }.
+  const EVENTS = {
+    longboat: {
+      id: "longboat", weight: 10,
+      title: "A Drifting Longboat",
+      text: "A longboat wallows in the swell, a handful of sunburnt souls waving weakly.",
+      options: [
+        { label: "Take them aboard", effect: (run, H) => { const nm = H.addCrew(); return { lines: [nm ? ("You haul them up. " + nm + " swears to pull their weight.") : "Your decks are already full; you share water and send them on."] }; } },
+        { label: "Rob them, then cut them loose", effect: (run, H) => { H.gold(35); H.rep("brethren", 2); H.rep("merchants", -2); return { lines: ["You take their coin and trinkets — 35 gold — and leave them the oars."] }; } },
+        { label: "Sail on", effect: () => ({ lines: ["You hold your course. Their cries fade astern."] }) },
+      ],
+    },
+    distress: {
+      id: "distress", weight: 8,
+      title: "Merchant in Distress",
+      text: "A merchant brig flies a distress pennant — a lean Crown cutter is closing to take her.",
+      options: [
+        { label: "Drive off the cutter", effect: (run, H) => { H.rep("merchants", 5); H.rep("navy", -3); return { lines: ["You come about to engage the attacker."], battle: "cutter" }; } },
+        { label: "Join the wolves — take her yourself", effect: (run, H) => { H.rep("merchants", -4); return { lines: ["You run up the black. Easy pickings…"], battle: "merchant" }; } },
+        { label: "None of your business", effect: () => ({ lines: ["You slip away. Not your fight."] }) },
+      ],
+    },
+    wreck: {
+      id: "wreck", weight: 9,
+      title: "Floating Wreckage",
+      text: "Spars and shattered planking drift on the tide — a ship died here recently.",
+      options: [
+        { label: "Salvage what floats", effect: (run, H) => { const g = 20 + Math.floor(Math.random() * 40); H.gold(g); const l = ["You pull " + g + " gold of goods from the wrack."]; if (Math.random() < 0.3) { H.damage("hull", 12); l.push("A jagged timber gouges your hull below the waterline."); } return { lines: l }; } },
+        { label: "Search for survivors", req: (run, H) => H.has("surgeon"), reqText: "needs a Surgeon", effect: (run, H) => { const nm = H.addCrew(); return { lines: [nm ? ("Your surgeon coaxes life back into a half-drowned sailor: " + nm + ".") : "You find one alive, but your decks are full."] }; } },
+        { label: "Leave it be", effect: () => ({ lines: ["Bad luck to loot the drowned, some say. You pass on."] }) },
+      ],
+    },
+    patrol: {
+      id: "patrol", weight: 7,
+      title: "Naval Patrol",
+      text: "A Crown cutter signals you to heave to and be searched.",
+      options: [
+        { label: "Pay the 'inspection fee' (40g)", req: (run) => run.gold >= 40, reqText: "need 40 gold", effect: (run, H) => { H.gold(-40); H.notor(-6); return { lines: ["Coin changes hands. The officer finds nothing amiss."] }; } },
+        { label: "Run up the black and fight", effect: (run, H) => { H.rep("navy", -3); return { lines: ["You show your true colours."], battle: "cutter" }; } },
+        { label: "Try to slip away", effect: (run, H) => { if (Math.random() < 0.5) return { lines: ["You lose them in a squall."] }; H.damage("masts", 14); return { lines: ["A parting shot cracks a spar as you flee."] }; } },
+      ],
+    },
+    becalmed: {
+      id: "becalmed", weight: 6,
+      title: "Becalmed",
+      text: "The wind dies. Sails hang limp under a white sky.",
+      options: [
+        { label: "Wait it out", effect: (run, H) => { H.supplies(-2); return { lines: ["Two days of still air and dwindling water before the breeze returns."] }; } },
+        { label: "Man the sweeps (Old Salt)", req: (run, H) => H.has("sailor"), reqText: "needs an Old Salt", effect: () => ({ lines: ["Your old salt finds a cat's-paw of wind and works you clear."] }) },
+      ],
+    },
+    bottle: {
+      id: "bottle", weight: 5, cond: (run) => !run.flags.tmap,
+      title: "A Message in a Bottle",
+      text: "A barnacled bottle bobs alongside. Inside: a scrap of chart marked with an inked cross.",
+      options: [
+        { label: "Follow the map", effect: (run, H) => { H.flag("tmap", true); H.addQuest("treasure_map"); return { lines: ["You mark the bearing. Somewhere out there, X marks the spot."] }; } },
+        { label: "Toss it back", effect: () => ({ lines: ["Probably a hoax. You let it drift."] }) },
+      ],
+    },
+    fever: {
+      id: "fever", weight: 6, cond: (run) => run.crew.length > 2,
+      title: "Fever Below Decks",
+      text: "A sweating sickness spreads in the forecastle.",
+      options: [
+        { label: "Physic the sick (Surgeon)", req: (run, H) => H.has("surgeon"), reqText: "needs a Surgeon", effect: () => ({ lines: ["Your surgeon breaks the fever. All hands pull through."] }) },
+        { label: "Dose them with rum and hope", effect: (run, H) => { if (Math.random() < 0.5) return { lines: ["The fever passes on its own. Lucky."] }; const nm = H.loseCrew(); return { lines: [(nm || "A hand") + " doesn't see the morning. Buried at sea."] }; } },
+      ],
+    },
+    parley: {
+      id: "parley", weight: 6,
+      title: "A Rival of the Account",
+      text: "A pirate sloop hails you — not for a fight, but a word.",
+      options: [
+        { label: "Share a drink and news", effect: (run, H) => { H.rep("brethren", 4); H.supplies(2); return { lines: ["You trade rumours and rum. The brethren remember friends."] }; } },
+        { label: "Demand tribute", effect: (run, H) => { if (Math.random() < 0.5) { H.gold(45); return { lines: ["They pay rather than bleed. 45 gold."] }; } H.rep("brethren", -4); return { lines: ["They laugh and sheer off, insulted."] }; } },
+      ],
+    },
+  };
+
+  // Multi-stage-ish quests. Completion applies `reward` (gold + faction rep).
+  const QUESTS = {
+    bounty_drake: {
+      id: "bounty_drake", type: "bounty", faction: "brethren", title: "Bounty: the Red Drake",
+      blurb: "The brethren will pay to see a Crown pirate-hunter on the bottom.",
+      targetEnemy: "cutter", reqRep: { brethren: -100 },
+      reward: { gold: 200, rep: { brethren: 10, navy: -5 } },
+      log: "Sink or take a Navy Cutter.",
+    },
+    deliver_silk: {
+      id: "deliver_silk", type: "delivery", faction: "merchants", title: "Cargo: Bolts of Silk",
+      blurb: "The Guild needs silk carried to Nassau — quietly, and soon.",
+      targetPort: "Nassau", reqRep: { merchants: -8 },
+      reward: { gold: 150, rep: { merchants: 12 } },
+      log: "Deliver the silk to Nassau.",
+    },
+    treasure_map: {
+      id: "treasure_map", type: "treasure", faction: "brethren", title: "The Inked Cross",
+      blurb: "A map from a bottle points to buried gold in the shallows.",
+      targetNode: 2, reward: { gold: 260, rep: { brethren: 6 } },
+      log: "Sail to the Reef Shallows and dig.",
+    },
+  };
+  // Quests offered on port rumour boards (treasure comes from an event instead).
+  const PORT_QUESTS = ["bounty_drake", "deliver_silk"];
 
   const FIRST_NAMES = ["Anne", "Jack", "Mary", "Edward", "Grace", "Henry", "Bess",
     "Tom", "Nell", "Will", "Kit", "Rourke", "Diego", "Mei", "Cuffee", "Salim",
@@ -122,6 +238,8 @@
     supplyPerLeg: 2,            // supplies burned sailing one map leg
     notorietyPerRaid: 25,
     notorietyDecayPerLeg: 3,
+    eventChance: 0.6,          // chance an open-water/island leg triggers an event
+    repPriceSwing: 0.006,      // per merchant-rep point, how much prices shift
 
     // Battle plane (world units; camera maps to canvas)
     arenaW: 1200,
@@ -133,9 +251,14 @@
     accel: 70,                 // u/s^2 toward target speed
     drag: 1.8,                 // how fast speed relaxes when sails eased
 
-    // Gunnery
-    reloadBase: 3.4,           // seconds at ideal manning
-    gunArcDeg: 38,             // half-arc each side of the beam a broadside covers
+    // Gunnery — cannons are manned individually; each gun's gunner sets its
+    // own reload time and accuracy. No auto-fire: the player orders each volley.
+    reloadBase: 3.4,           // per-cannon base; divided by (0.6 + gunnerReloadK×skill)
+    gunnerReloadK: 0.25,       // how much a gunner's gunnery skill speeds reload
+    gunnerAccK: 0.05,          // how much gunnery skill improves accuracy
+    gunneryXpPerFire: 0.03,    // gunnery skill a gunner earns each time they fire
+    skillMax: 9,               // skill cap
+    gunArcDeg: 40,             // half-arc each side of the beam a broadside covers
     accuracyBase: 0.62,
     accuracyRangeFalloff: 0.45,// fraction of accuracy lost at max range
     accuracyMotionPenalty: 0.30,// max accuracy lost vs a fast crossing target
@@ -164,6 +287,7 @@
 
   window.PIRATEDATA = {
     AREAS, SHOT_TYPES, SHIP_CLASSES, STATIONS, SKILLS, TRAITS, CAPTAIN_TRAITS,
-    WEAPONS, ENEMIES, FIRST_NAMES, NICKNAMES, PORT, TUNING,
+    WEAPONS, ENEMIES, FACTIONS, EVENTS, QUESTS, PORT_QUESTS,
+    FIRST_NAMES, NICKNAMES, PORT, TUNING,
   };
 })();

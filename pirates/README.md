@@ -32,29 +32,39 @@ Checks every data record's shape and the core battle-math invariants
 - **Click "New Voyage"**, pick a captain, and you're on the open-sea map.
 - **World map:** click a glowing adjacent node to sail there. Enemy nodes start a
   battle; ports open the shop; sailing burns supplies.
+- **World map:** ✦ marks a quest destination. Sailing into open water may spring a
+  **branching event** (a choice with consequences).
 - **Battle (real-time with pause):**
   - **← / →** (or A/D) — steer
   - **↑ / ↓** (or W/S) — raise / ease sail
   - **Space** — pause to issue orders (FTL-style)
   - **1 / 2 / 3** — round-shot / chain-shot / grape-shot
   - **Click an enemy area** (Hull/Masts/Rudder/Guns/Deck) — set your target
-  - **+ / –** on stations — move crew between Guns / Sails / Helm / Pumps
+  - **Cannons are crew-manned — there is no auto-fire.** Click a hand in the CREW
+    list, then click a **gun slot** to post them (or a **Helm/Sails/Pumps/Reserve**
+    button). Each manned gun reloads on its own; a better gunner reloads faster and
+    shoots straighter.
+  - **F** (or a battery's **FIRE** button) — discharge every *loaded* cannon on the
+    side that **bears**. Firing out of arc just wastes the load — turn to bear first.
   - **B** — board (only when alongside, within grapple range)
-  - Your broadsides auto-fire when a side **bears** on the enemy and is in range —
-    the skill is *maneuvering with the wind to bring guns to bear*.
 
 ## What the slice demonstrates
 
 - **Movement-driven naval combat** — heading, wind (the weather gage), range, and
   broadside firing arcs decide the fight.
+- **Crew-manned gunnery** — every cannon needs a gunner; that gunner's **skill** sets
+  the gun's reload speed and accuracy, and improves with use. You fire on command.
 - **Localized damage** — hull→flooding (you can sink), masts→speed, rudder→steering,
-  guns→firepower, deck→crew casualties; pick shot type to suit your intent.
-- **Crew as the power economy** — distribute hands across stations; effectiveness
-  drives reload, speed, turning, and flood control.
+  guns→fewer cannons online, deck→crew casualties; pick shot type to suit your intent.
+- **Crew as the power economy** — post hands to guns, helm, sails, and pumps; you never
+  have enough hands for everything at once.
 - **Realistic boarding** — close to grapple range, lash alongside, send the boarding
   party; melee is decided by crew, skills, and equipment. Capture pays more than sink.
-- **Open exploration + ports** — sail a node-map; repair at the shipwright, recruit at
-  the tavern, arm your crew and buy supplies at the market.
+- **Open exploration + events** — sail a node-map; open water throws branching events
+  whose choices are gated by your crew's traits, skills, and gold.
+- **Quests & factions** — take contracts (bounty / delivery / treasure) from port rumour
+  boards; your deeds shift standing with the **Navy, Merchant Guild, and Pirate
+  Brethren**, which colours prices and what's on offer.
 - **Roguelike economy** — gold, supplies, crew, ship condition; permadeath; reach the
   retire-gold goal at any port to win the run.
 

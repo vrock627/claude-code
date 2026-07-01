@@ -40,9 +40,11 @@ for (const k of Object.keys(D.SHIP_CLASSES)) {
   check(sc.crewIdeal * D.STATIONS.length <= sc.crewCap + D.STATIONS.length, `ship ${k}: crewIdeal vs cap sanity`);
 }
 
-// --- STATIONS ---
+// --- STATIONS (non-gun; cannons are manned individually now) ---
 const STATION_KEYS = new Set(D.STATIONS.map((s) => s.key));
-for (const want of ["guns", "sails", "helm", "pumps"]) check(STATION_KEYS.has(want), `station ${want} missing`);
+for (const want of ["sails", "helm", "pumps"]) check(STATION_KEYS.has(want), `station ${want} missing`);
+check(!STATION_KEYS.has("guns"), "'guns' should no longer be a station (cannons are per-gun manned)");
+for (const st of D.STATIONS) check(SKILL.has(st.skill), `station ${st.key}: skill ${st.skill} unknown`);
 
 // --- TRAITS / CAPTAIN / WEAPONS ---
 for (const k of Object.keys(D.TRAITS)) {
@@ -75,11 +77,64 @@ for (const k of Object.keys(D.ENEMIES)) {
   check(e.aggression >= 0 && e.aggression <= 1, `enemy ${k}: aggression must be 0..1`);
 }
 
+// --- FACTIONS ---
+const FACTION_KEYS = new Set(Object.keys(D.FACTIONS));
+for (const f of ["navy", "merchants", "brethren"]) check(FACTION_KEYS.has(f), `faction ${f} missing`);
+for (const k of Object.keys(D.FACTIONS)) check(D.FACTIONS[k].key === k && D.FACTIONS[k].label, `faction ${k}: bad meta`);
+for (const k of Object.keys(D.ENEMIES)) check(!D.ENEMIES[k].faction || FACTION_KEYS.has(D.ENEMIES[k].faction), `enemy ${k}: unknown faction`);
+
+// --- EVENTS: exercise every cond/req/effect against a mock run + helper API ---
+function mockRun() {
+  return {
+    gold: 100, supplies: 10, notoriety: 0, areas: { hull: 100, masts: 100, rudder: 100, guns: 100, deck: 100 },
+    crew: [{ trait: "surgeon", skills: {} }, { trait: "sailor", skills: {} }, { trait: "brawler", skills: {} }],
+    rep: { navy: 0, merchants: 0, brethren: 0 }, flags: {}, quests: [], questsDone: [],
+  };
+}
+const mockH = {
+  has: () => true, gold: () => {}, supplies: () => {}, rep: () => {}, notor: () => {},
+  damage: () => {}, repair: () => {}, flag: () => {}, hasFlag: () => false,
+  addQuest: () => {}, addCrew: () => "New Hand", loseCrew: () => "Old Hand",
+};
+for (const k of Object.keys(D.EVENTS)) {
+  const ev = D.EVENTS[k];
+  check(ev.id === k && ev.title && ev.text, `event ${k}: missing meta`);
+  check(Array.isArray(ev.options) && ev.options.length, `event ${k}: needs options`);
+  if (ev.cond) { check(typeof ev.cond === "function", `event ${k}: cond must be a function`); try { ev.cond(mockRun()); } catch (e) { check(false, `event ${k}: cond threw ${e.message}`); } }
+  for (let i = 0; i < ev.options.length; i++) {
+    const o = ev.options[i];
+    check(o.label, `event ${k} opt ${i}: no label`);
+    check(typeof o.effect === "function", `event ${k} opt ${i}: effect must be a function`);
+    if (o.req) { check(typeof o.req === "function", `event ${k} opt ${i}: req must be a function`); try { o.req(mockRun(), mockH); } catch (e) { check(false, `event ${k} opt ${i}: req threw ${e.message}`); } }
+    try {
+      const res = o.effect(mockRun(), mockH);
+      check(res && Array.isArray(res.lines) && res.lines.length, `event ${k} opt ${i}: effect must return {lines:[…]}`);
+      if (res.battle) check(D.ENEMIES[res.battle], `event ${k} opt ${i}: effect starts unknown battle ${res.battle}`);
+    } catch (e) { check(false, `event ${k} opt ${i}: effect threw ${e.message}`); }
+  }
+}
+
+// --- QUESTS ---
+for (const k of Object.keys(D.QUESTS)) {
+  const q = D.QUESTS[k];
+  check(q.id === k && q.title && q.log, `quest ${k}: missing meta`);
+  check(["bounty", "delivery", "treasure"].includes(q.type), `quest ${k}: bad type ${q.type}`);
+  check(FACTION_KEYS.has(q.faction), `quest ${k}: unknown faction ${q.faction}`);
+  check(q.reward && typeof q.reward.gold === "number", `quest ${k}: reward.gold required`);
+  for (const f in (q.reward.rep || {})) check(FACTION_KEYS.has(f), `quest ${k}: reward rep unknown faction ${f}`);
+  for (const f in (q.reqRep || {})) check(FACTION_KEYS.has(f), `quest ${k}: reqRep unknown faction ${f}`);
+  if (q.type === "bounty") check(D.ENEMIES[q.targetEnemy], `quest ${k}: unknown targetEnemy ${q.targetEnemy}`);
+  if (q.type === "delivery") check(typeof q.targetPort === "string", `quest ${k}: targetPort required`);
+  if (q.type === "treasure") check(typeof q.targetNode === "number", `quest ${k}: targetNode required`);
+}
+for (const id of D.PORT_QUESTS) check(D.QUESTS[id], `PORT_QUESTS references unknown quest ${id}`);
+
 // --- TUNING presence ---
 const TUNE_KEYS = ["startGold", "startSupplies", "startCrew", "supplyPerLeg", "arenaW", "arenaH",
   "windMinFactor", "windMaxFactor", "accel", "drag", "reloadBase", "gunArcDeg", "accuracyBase",
   "accuracyRangeFalloff", "accuracyMotionPenalty", "areaMax", "floodGain", "pumpRate", "floodSink",
-  "grappleRange", "boardTickSec", "boardLethality", "meleeBase", "enemyHullSurrender", "enemyCrewSurrender", "sinkGoldMult"];
+  "grappleRange", "boardTickSec", "boardLethality", "meleeBase", "enemyHullSurrender", "enemyCrewSurrender", "sinkGoldMult",
+  "gunnerReloadK", "gunnerAccK", "gunneryXpPerFire", "skillMax", "eventChance", "repPriceSwing"];
 for (const k of TUNE_KEYS) check(typeof D.TUNING[k] === "number", `TUNING.${k} missing/not a number`);
 const T = D.TUNING;
 check(T.windMinFactor < T.windMaxFactor, "windMinFactor must be < windMaxFactor");
@@ -96,10 +151,20 @@ function windFactor(headingMinusWind) {
 check(Math.abs(windFactor(0) - T.windMaxFactor * T.windStrength) < 1e-9, "running before the wind should give max factor");
 check(Math.abs(windFactor(Math.PI) - T.windMinFactor * T.windStrength) < 1e-9, "dead into the wind should give min factor");
 
-// reload time is positive and rewards more gun crew (effectiveness 0..1.5)
-const reload = (eff) => T.reloadBase / (0.5 + eff);
-check(reload(0) > reload(1.5), "more gun crew must reload faster");
-check(reload(1.5) > 0, "reload time must stay positive");
+// per-cannon reload: driven by the gunner's gunnery skill; a skilled gunner
+// reloads faster, an unmanned gun (skill treated as "no gunner") never fires.
+const cannonReload = (skill) => T.reloadBase / (0.6 + T.gunnerReloadK * skill);
+check(cannonReload(0) > cannonReload(5), "a more-skilled gunner must reload faster");
+check(cannonReload(5) > 0, "reload time must stay positive");
+check(T.gunnerReloadK > 0, "gunnery skill must matter to reload");
+// per-cannon accuracy rises with gunnery skill and stays in a sane band
+const acc = (skill) => Math.max(0.05, Math.min(0.96, T.accuracyBase * (1 + T.gunnerAccK * skill)));
+check(acc(5) > acc(0), "a more-skilled gunner must aim better");
+check(acc(9) <= 0.96 && acc(0) >= 0.05, "accuracy must stay within 0.05..0.96");
+// operational cannons per side scale with the gun-deck condition (0 → none)
+const opsPerSide = (guns, perSide) => Math.max(0, Math.ceil(perSide * guns / T.areaMax));
+check(opsPerSide(0, 5) === 0, "a destroyed gun-deck fires no cannons");
+check(opsPerSide(T.areaMax, 5) === 5, "an intact gun-deck fields every cannon");
 
 // flooding: a healthy hull never floods; a holed hull floods without pumps
 check((T.areaMax - T.areaMax) * T.floodGain === 0, "pristine hull must not flood");
@@ -121,4 +186,7 @@ console.log("Black Tide smoke OK — " +
   Object.keys(D.SHIP_CLASSES).length + " ships, " +
   Object.keys(D.SHOT_TYPES).length + " shot types, " +
   Object.keys(D.TRAITS).length + " traits, " +
-  Object.keys(D.ENEMIES).length + " enemies, all TUNING + battle-math invariants hold.");
+  Object.keys(D.ENEMIES).length + " enemies, " +
+  Object.keys(D.FACTIONS).length + " factions, " +
+  Object.keys(D.EVENTS).length + " events, " +
+  Object.keys(D.QUESTS).length + " quests; all TUNING + battle-math + event/quest invariants hold.");
