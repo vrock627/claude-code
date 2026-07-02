@@ -621,15 +621,64 @@
         "You pull back at the last second, jaw tight. She lets out a breath that's mostly relief.",
         "You pull out at the last second. \"…good call,\" she breathes, half wrecked, half laughing.",
       ],
+      pullHome: [
+        "She exhales hard against your shoulder, grip not loosening. \"…I hate that you did that,\" she says, quietly. \"That was absolutely the right call. I hate it. I'm grateful. I hate it.\" She doesn't move for a while.",
+        "\"…good,\" she manages, still wrecked, still not letting go. \"The responsible choice. I was about two seconds from not caring about the responsible choice.\"",
+      ],
+      pullOverlook: [
+        "She lets out a breath that sounds expensive. \"…thank you.\" The city's still there. She's looking at it now. \"I was not going to be the one to do that. I need you to know that about me.\"",
+      ],
+      pullBeach: [
+        "\"…good call,\" she says, to the sky. The ocean keeps going. She sounds simultaneously relieved and slightly disappointed, and she knows exactly how that sounds. \"Don't say anything.\"",
+      ],
+      pullParty: [
+        "She shudders through the last of it, hands still in your hair. \"…good. Good. We're being adults.\" Against your jaw, still catching her breath. \"I was not being an adult. Thank you for being an adult.\"",
+      ],
       inside: [
         "Neither of you stops or wants to. Her legs lock you in. The unspoken thing very loud in the quiet right after.",
         "She decides it at the same moment you do — keeps you there, heartbeat slamming against yours, not saying the obvious.",
+      ],
+      insideHome: [
+        "She goes quiet after. Her hand finds your chest in the dark and stays flat against your heartbeat, just counting. \"…okay,\" she says eventually. \"That happened.\" She doesn't sound sorry. She sounds like she's filing it somewhere very specific.",
+        "She doesn't move for a long moment. Then, against your shoulder: \"I wasn't supposed to let that happen.\" A pause. \"I did anyway.\" She says it like a verdict she already knew she was going to give herself.",
+        "Her breath comes out slow and not quite steady. \"…hi,\" she says eventually, to the ceiling. \"I think we have a situation.\" She laughs once, short, surprised at herself. \"I'm fine. I just need a second to be fine.\"",
+      ],
+      insideOverlook: [
+        "She leans her head back against the seat and lets out a long, slightly disbelieving laugh. \"…of all the ways this night was going to go.\" The city's doing its thing below. She keeps looking at it, not quite at you.",
+        "She watches the window fog from her breath for a second. \"…I told myself we were just going to look at the view.\" Quietly. \"I did tell myself that. Out loud, even.\"",
+        "A long pause. She's looking at the lights. \"…I'm not sure what to do with this.\" She says it matter-of-factly, like it's a problem she's trying to solve in real time. \"I'll figure it out.\" She sounds like she might.",
+      ],
+      insideBeach: [
+        "She tips her head back toward the sky and laughs — startled, real, salt air catching it. \"…okay. Okay, that was. Yeah.\" She doesn't move. The ocean keeps going. Neither of you is in any hurry to be vertical.",
+        "She catches her breath and then laughs, sudden and warm. \"…we're going to have sand in places that sand does not belong.\" She sounds delighted about it. \"I am choosing to be okay with that. Right now. In this moment.\"",
+        "The water keeps doing its thing. She says, mostly to the sky: \"…I need a minute.\" You both lie there while the bay keeps its own counsel. \"I'm good,\" she adds eventually. \"I'm just processing. Sand and everything.\"",
+      ],
+      insideParty: [
+        "The bass is still going through the wall. She's got her forehead to your jaw and her breathing is wrong in the best way, and she says, very quietly: \"…I am so in trouble.\" She doesn't sound upset about it.",
+        "She goes completely still after. Her hand comes up and covers her face. \"…the party is still happening,\" she says, not moving. \"I'm just — noting that. Out loud. While we're here.\"",
+        "She lets out a long breath. \"…that was supposed to be hypothetical.\" Quietly. \"I thought I was going to do the sensible thing.\" She still hasn't moved. \"I did not do the sensible thing.\"",
+      ],
+      insideFloor: [
+        "She buries her face in your neck and says something she clearly didn't plan to say. You feel her decide not to take it back. The music just keeps going.",
+        "The room doesn't notice or doesn't care, and either way she's not checking. Her grip on you goes somewhere between desperate and grateful and stays there.",
+        "She says your name. Just that. Once. Into your shoulder while the floor keeps going around you, and you don't think anyone has ever said your name quite like that before.",
       ],
       insideAdverse: [
         "A beat of silence, then she's laughing — not the good kind, not quite the bad kind. \"…okay. Okay. We did that.\" Her hand on your chest, not pushing, just — needing a second.",
         "She goes very still after. Not cold. Just somewhere she didn't plan to be. \"…hi,\" she manages, eventually. \"I need a minute. Just a minute. Stay.\"",
         "Her breath comes out shaky. \"…that was — \" She doesn't finish the sentence. Can't. Her hand comes up to cover her eyes and she's laughing and you can't quite tell if she's going to cry or not.",
         "\"…I didn't think about the after part,\" she admits, small. \"I was only thinking about the during part. Which was — \" She exhales. \"I need to sit up. Just for a second.\"",
+      ],
+      insideAdverseHome: [
+        "A beat of silence. Then, to the ceiling: \"…he's going to know.\" She's not talking at you. It's not an accusation — just the fact of it, sitting there. Her hand covers her face. \"I don't know why I said that out loud. I'm fine.\"",
+        "She goes very still. \"…I don't do this.\" Quietly. She catches herself. \"I didn't do this.\" A pause. \"Until now,\" she adds, even more quietly. You don't say anything. She needed to say it.",
+      ],
+      insideAdverseParty: [
+        "She laughs — short, slightly broken. \"…my husband is going to know.\" Flat. Not at you, not an accusation. Just the fact of it, sitting in the dark between you. \"I don't know why I keep saying things out loud tonight.\"",
+        "She goes very quiet. The bass keeps coming through the wall. \"…this is a problem,\" she says. She doesn't elaborate. The party doesn't either.",
+      ],
+      insideAdverseFloor: [
+        "She says, face hidden in your neck while the music keeps going: \"…I made a decision.\" A pause. \"I'm not sure it was the right one. I'm not sure it was the wrong one.\" Nobody out here is listening. \"I'll figure it out. Later.\"",
       ],
 
       // ----- Finish-where pools -----

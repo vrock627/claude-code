@@ -483,8 +483,27 @@
     // pregnancy-risk consequence.
     finish: {
       q: "Right at the edge —",
-      pull: { label: "Pull out", fx: { rom: 2, aff: 3 }, line: "You pull back at the last second, jaw tight, and finish against the curve of her hip with her hand fisted in the sheet and her forehead pressed to your temple, both of you breathing like you ran somewhere. \"…good call,\" she manages, eventually, a little wrecked, a little laughing. Neither of you moves for a while." },
-      inside: { label: "Stay. Finish inside.", fx: { rom: 6, lib: 4 }, line: "Neither of you stops, or wants to, and you feel her decide that at the same moment you do — her legs locking you in, the unspoken thing very loud in the quiet right after. She keeps you there a long minute, heartbeat slamming against yours, not saying the obvious. Neither do you. Both of you are thinking it." },
+      pull: { label: "Pull out", fx: { rom: 2, aff: 3 },
+        line: "You pull back at the last second, jaw tight, and finish against the curve of her hip with her hand fisted in the sheet and her forehead pressed to your temple, both of you breathing like you ran somewhere. \"…good call,\" she manages, eventually, a little wrecked, a little laughing. Neither of you moves for a while.",
+        overlook: "You pull back at the last second, jaw clenched, and finish against her hip with the city spread out below and her forehead dropped to your temple. Neither of you looks at the view for a while. \"…good call,\" she says eventually, still wrecked, still not letting go.",
+        beach: "You pull back and finish at the edge of the blanket, breathing into the salt air, her hand still fisted in your shirt. The ocean doesn't comment. \"…good call,\" she manages, to the sky. Neither of you moves for a while.",
+        party: "You pull out at the last second against the door, both of you breathing hard with the party muffled on the other side. She shudders through the last of it, not letting go, and says it into the side of your neck: \"…good call. That was the right move.\"",
+        floor: "You pull back on the floor with the crowd going around you. She gets her forehead to yours and her hands in your hair and the music keeps happening; you stop being part of it for a moment.",
+      },
+      inside: { label: "Stay. Finish inside.", fx: { rom: 6, lib: 4 },
+        line: "Neither of you stops, or wants to, and you feel her decide that at the same moment you do — her legs locking you in, the unspoken thing very loud in the quiet right after. She keeps you there a long minute, heartbeat slamming against yours, not saying the obvious. Neither do you. Both of you are thinking it.",
+        overlook: "She locks her legs the same moment you decide, the city spread below like it isn't even there. The unspoken thing fills the silence right after — loud, unmistakable, nobody saying it. You both look at the lights eventually, but not for a while.",
+        beach: "Neither of you stops. She locks you in and the ocean keeps going and the stars don't notice. The thing neither of you says sits between you in the salt air while both your heartbeats come back down.",
+        party: "The bass keeps coming through the wall. She locks you in against the door, breathing at your throat, the party three feet away and entirely elsewhere. \"…okay,\" she says eventually, very quiet. Neither of you moves for a minute.",
+        floor: "Right here on the floor, with the crowd going around you, and nobody looking. She locks her legs tight and the room narrows down to the two of you and stays that way until you both come back.",
+      },
+      insideAdverse: {
+        line: "A long silence after. She pulls in a slow breath and doesn't say the obvious thing. Neither do you.",
+        overlook: "A silence. She looks out at the city, not quite at you, while her breathing comes back down. You let her take the time.",
+        beach: "A silence. The water keeps going. She covers her face for just a second before putting her hand back down.",
+        party: "A silence in the room while the party keeps going through the wall, indifferent. She's the first to breathe normally again.",
+        floor: "A silence while the music doesn't stop. She gets her face in your neck and stays there, and you let her.",
+      },
       // After Pull Out: optional follow-up beat. Only fires for characters
       // whose entry sets `hasFinishWhere: true`. "ask" lets her pick.
       where: {

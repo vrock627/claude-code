@@ -1641,6 +1641,17 @@
     state.intim = { id, beat: 0, rounds: 0, after: afterFn, log: (introLines || []).slice(), closeTone: "good", raw: !!raw, finishDone: false, beatsKey: beatsKey || null };
     renderIntimacyBeat();
   }
+  // Returns a short key naming the current intimacy context.
+  // Used to pick situation-specific inside/pull/adverse voice lines.
+  function intimSituation() {
+    const im = state.intim;
+    if (!im) return "home";
+    if (im.beatsKey === "floor") return "floor";
+    if (im.beatsKey === "party") return "party";
+    if (im.beatsKey === "shoot") return "shoot";
+    if (state.date && state.date.place) return state.date.place;
+    return "home";
+  }
   function renderIntimacyBeat() {
     const im = state.intim, c = D.CHARACTERS[im.id], F = D.INTIMACY.finish;
     const beats = (im.beatsKey && D.INTIMACY[im.beatsKey] && D.INTIMACY[im.beatsKey].beats) || D.INTIMACY.beats;
@@ -1666,24 +1677,25 @@
       w.appendChild(el("p", "talk-prompt", F.q));
       o.appendChild(button(F.pull.label, () => {
         intimFx(im.id, F.pull.fx);
-        const vPull = pick(voiceFor(im.id, "intimacy.pull"), `intim.pull.${im.id}.${state.day}`);
-        im.log.push(vPull || F.pull.line); im.finishDone = true;
-        // Optional follow-up: "where?" sub-beat for characters who opt in.
+        const sit = intimSituation(), sitCap = sit.charAt(0).toUpperCase() + sit.slice(1);
+        const vPullPool = voiceFor(im.id, `intimacy.pull${sitCap}`) || voiceFor(im.id, "intimacy.pull");
+        const vPull = pick(vPullPool, `intim.pull.${im.id}.${state.day}`);
+        im.log.push(vPull || F.pull[sit] || F.pull.line); im.finishDone = true;
         if (c.hasFinishWhere && F.where) return renderFinishWhere();
         renderIntimacyBeat();
       }, "choice"));
       o.appendChild(button(F.inside.label, () => {
         intimFx(im.id, F.inside.fx);
-        const vIn = pick(voiceFor(im.id, "intimacy.inside"), `intim.inside.${im.id}.${state.day}`);
-        im.log.push(vIn || F.inside.line); im.finishDone = true;
+        const sit = intimSituation(), sitCap = sit.charAt(0).toUpperCase() + sit.slice(1);
+        const vInPool = voiceFor(im.id, `intimacy.inside${sitCap}`) || voiceFor(im.id, "intimacy.inside");
+        const vIn = pick(vInPool, `intim.inside.${im.id}.${state.day}`);
+        im.log.push(vIn || F.inside[sit] || F.inside.line); im.finishDone = true;
         if (!state.preg[im.id] && Math.random() < T.pregChanceRaw)
           state.preg[im.id] = { sinceDay: state.day, talked: false, status: null };
-        // Adverse response: characters with complicated feelings about
-        // finishing inside (guilt, alarm, regret) may react beyond the
-        // standard line. Per-character chance; falls back to global.
         const adverseChance = c.insideAdverseChance != null ? c.insideAdverseChance : (T.sexInsideAdverseChance || 0);
         if (adverseChance > 0 && Math.random() < adverseChance) {
-          const adverseLine = pick(voiceFor(im.id, "intimacy.insideAdverse"), `intim.insideAdv.${im.id}.${state.day}`);
+          const vAdvPool = voiceFor(im.id, `intimacy.insideAdverse${sitCap}`) || voiceFor(im.id, "intimacy.insideAdverse");
+          const adverseLine = pick(vAdvPool, `intim.insideAdv.${im.id}.${state.day}`) || (F.insideAdverse && (F.insideAdverse[sit] || F.insideAdverse.line));
           if (adverseLine) im.log.push(adverseLine);
         }
         renderIntimacyBeat();
