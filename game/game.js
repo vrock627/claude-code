@@ -1357,7 +1357,11 @@
       const r = nodeRoll(node, id), br = r.ok ? node.roll.win : node.roll.lose;
       const roll = { d20: r.roll, stat: r.statLbl ? `${r.statLbl} ${r.gauge}` : `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
       if (!r.ok && br.hard) return homeBail(br, roll);
-      if (r.ok && br.sex) return renderSexChoice(back, typeof br.sex === "string" ? br.sex : null);
+      if (r.ok && br.sex) {
+        const sexVar = typeof br.sex === "string" ? br.sex : null;
+        const vSex = vLine || subN("{n} pulls you in. The question just answered itself.", c.name);
+        return renderResult({ title: "She's right there", roll, lines: [vSex], tone: "good", then: () => renderSexChoice(back, sexVar), thenLabel: "…" });
+      }
       homeAccrue(br.fx || {});
       const lines = r.ok && vLine ? [vLine] : weaveAttire(br.lines, br.fx).map((l) => subN(l, c.name));
       return renderResult({ title: r.ok ? "She's right there" : "Not quite there", roll, lines: lines.map((l) => subN(l, c.name)), tone: r.ok ? "good" : "bad", then: back, thenLabel: "Back" });
@@ -1457,7 +1461,10 @@
       const r = homeRoll(dt.id, n.roll.dc), br = r.ok ? n.roll.win : n.roll.lose;
       const roll = { d20: r.roll, stat: `read ${r.gauge}`, vibe: 0, vibeNote: "", total: r.total, dc: r.dc };
       if (!r.ok && br.hard) return homeBail(br, roll);
-      if (r.ok && br.sex) return renderSexChoice(selfBack, typeof br.sex === "string" ? br.sex : null);
+      if (r.ok && br.sex) {
+        const sexVar = typeof br.sex === "string" ? br.sex : null;
+        return renderResult({ title: "She's right there", roll, lines: [subN("{n} reaches for you under the water. The rest of the night just decided itself.", c.name)], tone: "good", then: () => renderSexChoice(selfBack, sexVar), thenLabel: "…" });
+      }
       homeAccrue(br.fx || {});
       const nextOnWin = r.ok && n.roll.swimNext ? () => swimList(n.roll.swimNext, roomIdx) : (r.ok && n.sub ? () => descend(n.sub) : selfBack);
       const lines = r.ok && vLine ? [vLine] : weaveAttire(br.lines, br.fx).map((l) => subN(l, c.name));
@@ -1613,7 +1620,8 @@
     }
     homeAccrue(sx.raw.win.fx);
     const vWin = voiceFor(id, `places.${dt.place}.sexRawWin`);
-    renderIntimacy(id, vWin ? [vWin] : sx.raw.win.lines, renderDateEnd, true, variant);
+    const rawLines = (vWin ? [vWin] : sx.raw.win.lines).map((l) => subN(l, c.name));
+    return renderResult({ title: "She says yes", roll, lines: rawLines, tone: "good", then: () => renderIntimacy(id, [], renderDateEnd, true, variant), thenLabel: "…" });
   }
   // ---- shared, non-graphic intimacy beats (home date + party slip-away) ----
   function intimFx(id, fx) {
