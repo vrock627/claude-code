@@ -1813,8 +1813,14 @@
     if (k === "main" || k === "yard") for (const id of guests) o.appendChild(button(`Dance with ${D.CHARACTERS[id].name}`, () => renderDanceModes(id), "choice"));
     if (k === "kitchen") for (const id of guests) o.appendChild(button(`Body shots with ${D.CHARACTERS[id].name}`, () => renderBodyShot(id), fi >= spicyAt() ? "choice move" : "choice"));
     if ((k === "main" || k === "kitchen") && guests.length && fi >= 1) for (const id of guests) o.appendChild(button(`See who ${D.CHARACTERS[id].name}'s talking to`, () => renderNpc(id), "choice"));
-    if (k === "main") for (const id of guests) if (fi >= D.PARTY.privateGateFlow && recept(id) >= D.PARTY.privateGateInterest) o.appendChild(button(`Slip away somewhere quiet with ${D.CHARACTERS[id].name}`, () => renderHookup(id, "slip"), "choice move"));
-    if (k === "yard" || k === "upstairs") for (const id of guests) if (fi >= D.PARTY.privateGateFlow && recept(id) >= D.PARTY.privateGateInterest) o.appendChild(button(`Find a room with ${D.CHARACTERS[id].name}`, () => renderHookup(id, "room"), "choice move"));
+    if (k === "main") for (const id of guests) {
+      const fp = Math.max(0, D.PARTY.privateGateFlow - fi), rp = Math.max(0, D.PARTY.privateGateInterest - recept(id)), pen = fp * 5 + Math.floor(rp / 8);
+      o.appendChild(button(`Slip away somewhere quiet with ${D.CHARACTERS[id].name}${pen > 0 ? `  (risky — DC +${pen})` : ""}`, () => renderHookup(id, "slip", pen), "choice move"));
+    }
+    if (k === "yard" || k === "upstairs") for (const id of guests) {
+      const fp = Math.max(0, D.PARTY.privateGateFlow - fi), rp = Math.max(0, D.PARTY.privateGateInterest - recept(id)), pen = fp * 5 + Math.floor(rp / 8);
+      o.appendChild(button(`Find a room with ${D.CHARACTERS[id].name}${pen > 0 ? `  (risky — DC +${pen})` : ""}`, () => renderHookup(id, "room", pen), "choice move"));
+    }
     for (const id of guests) o.appendChild(button(`Bring ${D.CHARACTERS[id].name} a drink`, () => partyBuyHer(id), "choice"));
     o.appendChild(button(`Grab another drink${pr.drinks >= T.overDrinkAt - 1 ? " (you're wobbling)" : ""}`, partyDrink, "choice"));
     o.appendChild(button("Move to another room", renderPartyRooms, "choice subtle"));
@@ -1903,21 +1909,21 @@
     if (mode === "room") return { ask: D.PARTY.hookup.ask, esc: D.PARTY.hookup.esc, win: D.PARTY.hookup.win, headOut: "Back out into the noise — eventually" };
     return { ask: `You catch ${c.name}'s eye and tilt your head toward the quiet of the hallway. She holds the look a second — then follows. The noise drops behind a door pulled most of the way shut.`, esc: D.PARTY.privateScene.esc, win: D.PARTY.privateScene.win, headOut: "Back to the noise — eventually" };
   }
-  function renderHookup(id, mode) {
+  function renderHookup(id, mode, penalty) {
     const c = D.CHARACTERS[id], sc = hookupScene(id, mode);
     renderHud(); clearScreen();
     const w = el("div", "talk");
     w.appendChild(el("div", "talk-head", `Just the two of you · ${c.name}`));
     w.appendChild(el("p", "char-line", subN(sc.ask, c.name)));
     const o = el("div", "choices");
-    sc.esc.forEach((e) => o.appendChild(button(e.label, () => resolveHookup(id, e, sc), "choice")));
+    sc.esc.forEach((e) => o.appendChild(button(e.label, () => resolveHookup(id, e, sc, penalty || 0), "choice")));
     o.appendChild(button("Actually — not here, not now", () => { adjustBar(id, "affection", 1); renderResult({ title: "Pulled back", lines: [`You ease off. ${c.name} exhales, half relieved, and squeezes your hand on the way back in. Affection +1.`], tone: "good", then: partyAfter }); }, "choice subtle"));
     w.appendChild(o); screen().appendChild(w);
   }
-  function resolveHookup(id, esc, sc) {
+  function resolveHookup(id, esc, sc, penalty) {
     const c = D.CHARACTERS[id], roll = d20();
     const gauge = Math.floor(recept(id) / 6) + Math.floor(barVal(id, "libido") / 8) + Math.floor(barVal(id, "romance") / 12);
-    const dc = 13, total = roll + gauge + esc.mod + T.partyVibe;
+    const dc = 13 + (penalty || 0), total = roll + gauge + esc.mod + T.partyVibe;
     const ok = roll !== 1 && (roll === 20 || total >= dc);
     const rollBox = { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party heat", total, dc };
     if (ok) {
@@ -1951,7 +1957,18 @@
     w.appendChild(el("p", "char-line", subN(P.ask, c.name)));
     const have = (state.inventory.condom || 0) > 0;
     const o = el("div", "choices");
-    o.appendChild(button(have ? `Use a condom  (have ${state.inventory.condom})` : "Use a condom — none in your bag", have ? () => { state.inventory.condom -= 1; partyApplyFx(id, P.condom.fx); renderIntimacy(id, P.condom.lines, after, false, bk); } : null, "choice", !have));
+    o.appendChild(button(have ? `Use a condom  (have ${state.inventory.condom})  (DC ${P.condom.dc || 11})` : "Use a condom — none in your bag", have ? () => {
+      const roll = d20();
+      const gauge = Math.floor(composite(id) / 6) + Math.floor(barVal(id, "libido") / 8) + Math.floor(barVal(id, "romance") / 12);
+      const dc = P.condom.dc || 11, total = roll + gauge + T.partyVibe;
+      const ok = roll !== 1 && (roll === 20 || total >= dc);
+      const rollBox = { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party heat", total, dc };
+      if (!ok) {
+        const failLines = (P.condom.failLines || [`${c.name} slows, both hands on your arms. "…I want to. I just — not tonight. I'm sorry."`]).map((l) => subN(l, c.name));
+        return renderResult({ title: "She pumps the brakes", roll: rollBox, lines: failLines, tone: "bad", then: partyAfter, thenLabel: "Back to the party" });
+      }
+      state.inventory.condom -= 1; partyApplyFx(id, P.condom.fx); renderIntimacy(id, P.condom.lines, after, false, bk);
+    } : null, "choice", !have));
     o.appendChild(button(`Go without — read the moment  (DC ${P.raw.dc || 16})`, () => {
       // Going raw requires a real roll — the moment has to be exactly right.
       const roll = d20();
