@@ -1835,11 +1835,11 @@
     if ((k === "main" || k === "kitchen") && guests.length && fi >= 1) for (const id of guests) o.appendChild(button(`See who ${D.CHARACTERS[id].name}'s talking to`, () => renderNpc(id), "choice"));
     if (k === "main") for (const id of guests) {
       const fp = Math.max(0, D.PARTY.privateGateFlow - fi), rp = Math.max(0, D.PARTY.privateGateInterest - recept(id)), pen = fp * 5 + Math.floor(rp / 8);
-      o.appendChild(button(`Slip away somewhere quiet with ${D.CHARACTERS[id].name}${pen > 0 ? `  (risky — DC +${pen})` : ""}`, () => renderHookup(id, "slip", pen), "choice move"));
+      o.appendChild(button(`Slip away somewhere quiet with ${D.CHARACTERS[id].name}${pen > 0 ? `  (risky — DC +${pen})` : ""}`, () => resolveFollowCheck(id, "slip", pen), "choice move"));
     }
     if (k === "yard" || k === "upstairs") for (const id of guests) {
       const fp = Math.max(0, D.PARTY.privateGateFlow - fi), rp = Math.max(0, D.PARTY.privateGateInterest - recept(id)), pen = fp * 5 + Math.floor(rp / 8);
-      o.appendChild(button(`Find a room with ${D.CHARACTERS[id].name}${pen > 0 ? `  (risky — DC +${pen})` : ""}`, () => renderHookup(id, "room", pen), "choice move"));
+      o.appendChild(button(`Find a room with ${D.CHARACTERS[id].name}${pen > 0 ? `  (risky — DC +${pen})` : ""}`, () => resolveFollowCheck(id, "room", pen), "choice move"));
     }
     for (const id of guests) o.appendChild(button(`Bring ${D.CHARACTERS[id].name} a drink`, () => partyBuyHer(id), "choice"));
     o.appendChild(button(`Grab another drink${pr.drinks >= T.overDrinkAt - 1 ? " (you're wobbling)" : ""}`, partyDrink, "choice"));
@@ -1924,6 +1924,26 @@
         lines: [vFail || `${c.name} catches your hands and sets them back. "Easy. Not like that, not here."`, `Romance ${T.danceFail.romance} · Affection ${T.danceFail.affection}`], tone: "bad", then: partyAfter });
     }
   }
+  function resolveFollowCheck(id, mode, penalty) {
+    const c = D.CHARACTERS[id];
+    const roll = d20();
+    const gauge = Math.floor(recept(id) / 7) + Math.floor(barVal(id, "romance") / 10);
+    const dc = 12 + (penalty || 0), total = roll + gauge + T.partyVibe;
+    const ok = roll !== 1 && (roll === 20 || total >= dc);
+    const rollBox = { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party heat", total, dc };
+    if (ok) {
+      const vLine = voiceFor(id, "party.followLine");
+      const line = vLine || (mode === "slip"
+        ? `You catch ${c.name}'s eye and tilt your head toward the hallway. She holds the look a second — then follows. The noise drops behind a door pulled most of the way shut.`
+        : `You nod toward the stairs. ${c.name} glances around once, then follows without a word.`);
+      renderResult({ title: "She follows", roll: rollBox, lines: [subN(line, c.name)], tone: "good", then: () => renderHookup(id, mode, penalty), thenLabel: "…" });
+    } else {
+      const vFail = voiceFor(id, "party.followFail");
+      const failLine = vFail || `${c.name} catches the look, gives a small smile, and stays right where she is. The crowd swallows the moment.`;
+      adjustBar(id, "romance", -3);
+      renderResult({ title: "She stays", roll: rollBox, lines: [subN(failLine, c.name), "Romance −3"], tone: "bad", then: partyAfter, thenLabel: "Back to the party" });
+    }
+  }
   function hookupScene(id, mode) {
     const c = D.CHARACTERS[id];
     if (mode === "room") return { ask: D.PARTY.hookup.ask, esc: D.PARTY.hookup.esc, win: D.PARTY.hookup.win, headOut: "Back out into the noise — eventually" };
@@ -1950,7 +1970,7 @@
       adjustBar(id, "romance", T.privateReward.romance); adjustBar(id, "libido", T.privateReward.libido); adjustBar(id, "attraction", T.privateReward.attractionEvent);
       bumpHeat();
       const vLine = esc.label ? voiceFor(id, `party.privateEsc.${esc.label}`) : null;
-      renderResult({ title: "She's all the way in", roll: rollBox, lines: [subN(vLine || esc.line, c.name)], tone: "good", then: () => renderPartyProtection(id, sc), thenLabel: "…and then" });
+      renderResult({ title: "She's all the way in", roll: rollBox, lines: [subN(vLine || esc.line, c.name)], tone: "good", then: () => renderPartyApproach(id, sc), thenLabel: "…" });
     } else {
       adjustBar(id, "romance", T.privateFail.romance); adjustBar(id, "affection", T.privateFail.affection);
       state.party.guests = state.party.guests.filter((g) => g !== id);
@@ -1965,6 +1985,42 @@
     if (fx.lib) adjustBar(id, "libido", fx.lib);
     if (fx.atr) adjustBar(id, "attraction", fx.atr);
     if (fx.kiss && !state.milestones[id].kiss) { state.milestones[id].kiss = true; adjustBar(id, "attraction", 3); }
+  }
+  function renderPartyApproach(id, sc) {
+    const c = D.CHARACTERS[id];
+    renderHud(); clearScreen();
+    const w = el("div", "talk");
+    w.appendChild(el("div", "talk-head", `Just the two of you · ${c.name}`));
+    const vAsk = voiceFor(id, "party.approachAsk");
+    w.appendChild(el("p", "char-line", subN(vAsk || `The door's shut. The noise is muffled to a pulse. She's watching you, waiting to see what you do with this.`, c.name)));
+    const o = el("div", "choices");
+    o.appendChild(button("Pull her in for a kiss", () => {
+      const roll = d20();
+      const gauge = Math.floor(recept(id) / 6) + Math.floor(barVal(id, "libido") / 8) + Math.floor(barVal(id, "romance") / 12);
+      const dc = 13, total = roll + gauge + T.partyVibe;
+      const ok = roll !== 1 && (roll === 20 || total >= dc);
+      const rollBox = { d20: roll, stat: `read ${gauge}`, vibe: T.partyVibe, vibeNote: "party heat", total, dc };
+      if (ok) {
+        adjustBar(id, "romance", 6); adjustBar(id, "libido", 4); bumpHeat();
+        const vWin = voiceFor(id, "party.approachKissWin");
+        renderResult({ title: "She's right there", roll: rollBox, lines: [subN(vWin || `She comes up to meet you and doesn't stop there.`, c.name), "Romance +6 · Libido +4"], tone: "good", then: () => renderPartyProtection(id, sc), thenLabel: "…" });
+      } else {
+        adjustBar(id, "romance", -2);
+        const vFail = voiceFor(id, "party.approachKissFail");
+        renderResult({ title: "Not yet", roll: rollBox, lines: [subN(vFail || `She turns her head just enough. "…not yet. Slow down."`, c.name), "Romance −2"], tone: "bad", then: () => renderPartyApproach(id, sc), thenLabel: "Try differently" });
+      }
+    }, "choice"));
+    o.appendChild(button("Take her slowly — hands first", () => {
+      adjustBar(id, "romance", 4); adjustBar(id, "libido", 6);
+      const vSlow = voiceFor(id, "party.approachSlow");
+      renderResult({ title: "No rush", lines: [subN(vSlow || `You don't rush it. She leans into you and lets the quiet do the work.`, c.name), "Romance +4 · Libido +6"], tone: "good", then: () => renderPartyProtection(id, sc), thenLabel: "…" });
+    }, "choice"));
+    o.appendChild(button("Slow it back down — just be here with her", () => {
+      adjustBar(id, "affection", 3); adjustBar(id, "romance", 2);
+      const vBack = voiceFor(id, "party.approachBack");
+      renderResult({ title: "Just this", lines: [subN(vBack || `You ease back. She reads it without needing it explained and something in her relaxes. "…yeah. This is good too."`, c.name), "Affection +3 · Romance +2"], tone: "good", then: partyAfter, thenLabel: "Back to the party" });
+    }, "choice subtle"));
+    w.appendChild(o); screen().appendChild(w);
   }
   function renderPartyProtection(id, sc, protKey) {
     protKey = protKey || "party";

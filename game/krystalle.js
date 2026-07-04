@@ -775,6 +775,41 @@
       drinkBring: [
         "Krystalle clinks your glass. \"You read my mind.\" Said low, said directly to you, eyes a beat too long.",
       ],
+      followLine: [
+        "She holds your look for one beat, then puts down her drink. Doesn't say a word. Just follows.",
+        "Krystalle tilts her head slightly, decides something, and falls in behind you without announcing it.",
+        "She glances at the room once — a quick inventory — then looks back at you. \"…lead.\"",
+      ],
+      followFail: [
+        "Krystalle sees it. Gives you that specific small smile — not now, not here — and tilts her chin back toward the party. You read it.",
+        "She shakes her head once, tiny, with the ghost of a smile. Stays planted. The moment dissolves into the noise.",
+        "Krystalle catches your eye and very deliberately looks away. Not cold. Just not tonight.",
+      ],
+      approachAsk: [
+        "The bass is still thumping through the wall, but it's muffled now, far away. She's watching you in the quiet like she's waiting to find out what kind of person you are.",
+        "Door shut. The light in here is bad and neither of you has mentioned it. Krystalle tilts her head a little, watching. Waiting.",
+        "Just the two of you. The party on the other side of the wall might as well be in another city. She's looking at you. Not saying anything yet.",
+      ],
+      approachKissWin: [
+        "She comes up on her toes and meets you before you've even gotten there. \"…finally,\" she breathes, more to herself than you.",
+        "She lets you close the distance and then she takes over, both hands at your collar. \"…okay. Yes. This.\"",
+        "Her eyes close first. \"…I've been thinking about this since before we left the main room. Don't tell me if you knew that.\"",
+      ],
+      approachKissFail: [
+        "She turns her head just — barely. \"…give me a second. I'm still catching up.\" Not no. Not yet.",
+        "Her hand comes to your chest and holds. \"…slower. Do it slower. You're in too much of a hurry.\"",
+        "\"…hey.\" Soft, not cold. \"I'm right here. You don't have to rush like we're going to get caught.\"",
+      ],
+      approachSlow: [
+        "She sighs into it, low and real. \"…I've wanted someone to do that for months and I cannot believe it's in a party bathroom.\"",
+        "She lets your hands stay where they land and tilts her head back. \"…yes. That. Keep doing that.\"",
+        "She's quiet for a long moment. Then: \"…you're not in a hurry. I really like that about you.\"",
+      ],
+      approachBack: [
+        "\"…good.\" She exhales. \"I'm glad you did that. It's — this is good.\" Her hand finds yours and stays.",
+        "She looks at you for a second — surprised, soft. \"…yeah. Yeah. This is what I actually wanted.\"",
+        "Krystalle leans her forehead against your shoulder. Doesn't say anything. The party keeps going on the other side of the wall.",
+      ],
       floorAsk: "Krystalle's mouth at your ear over the bass: \"…nobody's looking. Your call. Yes or no, tell me now.\"",
       floorWin: [
         "Krystalle stops being anything except the woman you've been earning for weeks.",
