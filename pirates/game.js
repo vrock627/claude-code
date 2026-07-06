@@ -114,17 +114,38 @@
   // ---------------------------------------------------------------------------
   // Crew + ship factories
   // ---------------------------------------------------------------------------
+  // Personality/ability quirks a hand carries (1–2). No jobs — competence is in
+  // the skills they level. `traitSum` reads a numeric effect across a hand's
+  // quirks; `hasTrait`/`traitAnyBool` read presence/boolean effects.
+  const traitEffects = (t) => (D.TRAITS[t] && D.TRAITS[t].effects) || {};
+  const hasTrait = (c, key) => !!(c.traits && c.traits.indexOf(key) >= 0);
+  function traitSum(c, field) { let s = 0; if (c.traits) for (const t of c.traits) { const v = traitEffects(t)[field]; if (typeof v === "number") s += v; } return s; }
+  const traitAnyBool = (c, field) => !!(c.traits && c.traits.some((t) => traitEffects(t)[field]));
+  const crewHasTrait = (run, key) => run.crew.some((c) => hasTrait(c, key));
+  function crewTraitSum(run, field) { let s = 0; for (const c of run.crew) s += traitSum(c, field); return s; }
+  function crewTraitMax(run, field) { let m = 0; for (const c of run.crew) { const v = traitSum(c, field); if (v > m) m = v; } return m; }
+  const crewTraitCount = (run, field) => run.crew.filter((c) => traitAnyBool(c, field)).length;
+  const traitLabels = (c) => (c.traits || []).map((t) => (D.TRAITS[t] ? D.TRAITS[t].label : t)).join(", ");
+
+  function pickTraits(forced) {
+    const keys = Object.keys(D.TRAITS), traits = [];
+    if (forced) for (const t of [].concat(forced)) if (D.TRAITS[t] && traits.indexOf(t) < 0) traits.push(t);
+    if (!traits.length) traits.push(choice(keys));
+    if (Math.random() < 0.4) { let g = 0, t = choice(keys); while (traits.indexOf(t) >= 0 && g++ < 12) t = choice(keys); if (traits.indexOf(t) < 0) traits.push(t); }
+    return traits;
+  }
   function makeCrew(opts) {
     opts = opts || {};
-    const traitKey = opts.trait || choice(Object.keys(D.TRAITS));
+    const traits = pickTraits(opts.traits || opts.trait);
     const skills = {};
     for (const s of D.SKILLS) skills[s] = randInt(0, 2);
-    const mods = D.TRAITS[traitKey].mods || {};
-    for (const k in mods) skills[k] = Math.max(0, (skills[k] || 0) + mods[k]);
+    for (const t of traits) { const aff = traitEffects(t).skillAffinity || {}; for (const k in aff) skills[k] = Math.min(T.skillMax, (skills[k] || 0) + aff[k]); }
+    if (opts.skills) for (const k in opts.skills) skills[k] = Math.min(T.skillMax, (skills[k] || 0) + opts.skills[k]);
     let name = choice(D.FIRST_NAMES);
     if (Math.random() < 0.5) name += " " + choice(D.NICKNAMES);
-    const loy = T.loyaltyStart + (D.TRAITS[traitKey].loy || 0) + randInt(-6, 6);
-    return { name, trait: traitKey, skills, hp: 100, weapon: opts.weapon || "fists", loyalty: clamp(loy, 0, 100), role: null };
+    let loy = T.loyaltyStart + randInt(-6, 6), maxHp = 100;
+    for (const t of traits) { const e = traitEffects(t); loy += (e.loy || 0); maxHp += (e.maxHp || 0); }
+    return { name, traits, skills, hp: maxHp, maxHp, weapon: opts.weapon || "fists", loyalty: clamp(loy, 0, 100), role: null };
   }
   // Skill value → rank ({label, tag}); skills grow through use up to skillMax.
   function rankOf(v) {
@@ -132,8 +153,10 @@
     for (const rk of D.RANKS) if (v >= rk.min) r = rk;
     return r;
   }
+  // Quick Study and the like speed learning for that hand.
   function gainSkill(c, key, amt) {
     if (!c) return;
+    amt *= (1 + traitSum(c, "xpMult"));
     c.skills[key] = Math.min(T.skillMax, (c.skills[key] || 0) + amt);
   }
   function freshAreas() {
@@ -141,17 +164,21 @@
     for (const ar of D.AREAS) a[ar.key] = T.areaMax;
     return a;
   }
-  // Melee power now scales with the hand's health — wounded crew fight worse.
+  // Melee power scales with the hand's health (wounded fight worse) and their
+  // boarding quirks (Brawler up, Coward down).
   const meleePower = (c) =>
     (T.meleeBase + (c.skills.melee || 0) + (D.WEAPONS[c.weapon] ? D.WEAPONS[c.weapon].melee : 0))
-    * (0.4 + 0.6 * clamp((c.hp == null ? 100 : c.hp) / 100, 0, 1));
+    * (0.4 + 0.6 * clamp((c.hp == null ? 100 : c.hp) / (c.maxHp || 100), 0, 1))
+    * (1 + traitSum(c, "board"));
   const avgSkill = (crew, k) => crew.length ? crew.reduce((s, c) => s + (c.skills[k] || 0), 0) / crew.length : 0;
 
   // --- Officers: one holder per role; full effect with the matching trait ---
   function officerHolder(roleKey) { return state.run ? state.run.crew.find((c) => c.role === roleKey) || null : null; }
+  // No jobs: an officer's effect scales with their level in the role's skill.
   function officerFactor(roleKey) {
     const h = officerHolder(roleKey); if (!h) return 0;
-    return h.trait === D.OFFICER_ROLES[roleKey].trait ? 1 : 0.6;
+    const sk = h.skills[D.OFFICER_ROLES[roleKey].skill] || 0;
+    return clamp(T.officerFloor + (1 - T.officerFloor) * (sk / T.officerRefSkill), T.officerFloor, 1);
   }
   // Multiplicative field (e.g. reloadMult 0.9): blends from 1 → role value by factor.
   function officerMult(roleKey, field) {
@@ -186,7 +213,7 @@
     let guard = 0;
     while (amount > 0 && state.run.crew.length > 0 && guard++ < 200) {
       const c = choice(state.run.crew);
-      if (c.hp == null) c.hp = 100;
+      if (c.hp == null) c.hp = c.maxHp || 100;
       const d = Math.min(amount, c.hp);
       c.hp -= d; amount -= d;
       if (c.hp <= 0) { changeMorale(-T.moraleLostHand); killCrewMember(c); }
@@ -195,12 +222,14 @@
   // Heal wounded hands between fights (called per map leg). The best medicine
   // aboard (Surgeon / Ship's Doctor) speeds it; the healer trains medicine.
   function healCrewOverLeg() {
-    const wounded = state.run.crew.filter((c) => (c.hp == null ? 100 : c.hp) < 100);
+    const wounded = state.run.crew.filter((c) => (c.hp == null ? 100 : c.hp) < (c.maxHp || 100));
     if (!wounded.length) return;
     let healer = null, best = -1;
     for (const c of state.run.crew) { const m = c.skills.medicine || 0; if (m > best) { best = m; healer = c; } }
-    let heal = (T.healBase + best * T.healPerMedicine) * officerMult("ships_doctor", "healMult");
-    for (const c of wounded) { if (c.hp == null) c.hp = 100; c.hp = clamp(c.hp + heal, 0, 100); }
+    // Base + best medic's skill + a Ship's Doctor + any Sawbones aboard.
+    const heal = (T.healBase + best * T.healPerMedicine) * officerMult("ships_doctor", "healMult")
+      + crewTraitSum(state.run, "healPerLeg");
+    for (const c of wounded) { if (c.hp == null) c.hp = c.maxHp || 100; c.hp = clamp(c.hp + heal, 0, c.maxHp || 100); }
     if (healer) gainSkill(healer, "medicine", T.xpMedicinePerHeal);
   }
 
@@ -211,10 +240,11 @@
 
   function newGame(captainTrait) {
     const crew = [];
-    crew.push(makeCrew({ trait: "gunner", weapon: "cutlass" }));
-    crew.push(makeCrew({ trait: "carpenter" }));
-    crew.push(makeCrew({ trait: "brawler", weapon: "cutlass" }));
-    while (crew.length < T.startCrew) crew.push(makeCrew({}));
+    crew.push(makeCrew({ traits: ["crackshot"], skills: { gunnery: 3 }, weapon: "cutlass" }));
+    crew.push(makeCrew({ traits: ["handy"], skills: { repair: 2, gunnery: 1 } }));
+    crew.push(makeCrew({ traits: ["brawler"], skills: { melee: 2, gunnery: 1 }, weapon: "cutlass" }));
+    crew.push(makeCrew({ traits: ["sawbones"], skills: { medicine: 2, sailing: 1 } }));
+    while (crew.length < T.startCrew) crew.push(makeCrew({ skills: { gunnery: 1, sailing: 1 } }));
     const run = {
       captain: captainTrait,
       shipClass: "sloop",
@@ -230,6 +260,7 @@
       flags: {},         // misc story flags
       morale: T.startMorale,
       legsSincePort: 0,  // for overwork drift
+      legsSinceShare: 0, // for greedy-hand pressure
     };
     state = { screen: "map", run, map: makeMap(), battle: null, msg: null, flash: 0 };
     save();
@@ -247,12 +278,16 @@
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return false;
       const d = JSON.parse(raw);
-      // Backfill crew-depth fields for saves made before iteration 3.
+      // Backfill crew-depth fields for saves made before iterations 3–4.
       const run = d.run;
       if (run.morale == null) run.morale = T.startMorale;
       if (run.legsSincePort == null) run.legsSincePort = 0;
+      if (run.legsSinceShare == null) run.legsSinceShare = 0;
+      const OLD_TRAIT = { gunner: "crackshot", brawler: "brawler", carpenter: "handy", surgeon: "sawbones", sailor: "sealegs", lookout: "sharpeyed", drunkard: "drunkard" };
       for (const c of run.crew || []) {
-        if (c.hp == null) c.hp = 100;
+        if (!Array.isArray(c.traits)) { c.traits = [OLD_TRAIT[c.trait] || choice(Object.keys(D.TRAITS))]; delete c.trait; }
+        if (c.maxHp == null) c.maxHp = 100 + c.traits.reduce((s, t) => s + (traitEffects(t).maxHp || 0), 0);
+        if (c.hp == null) c.hp = c.maxHp;
         if (c.loyalty == null) c.loyalty = T.loyaltyStart;
         if (c.role === undefined) c.role = null;
       }
@@ -278,6 +313,18 @@
     return { nodes, current: 0, revealed: [0, 1, 2] };
   }
   function nodeById(id) { return state.map.nodes.find((n) => n.id === id); }
+  // Reveal nodes out to `hops` links away (Sharp-Eyed / a Navigator see further).
+  function revealFrom(node, hops) {
+    const seen = { [node.id]: true }; let frontier = [node];
+    for (let h = 0; h < hops; h++) {
+      const next = [];
+      for (const nd of frontier) for (const l of nd.links) if (!seen[l]) {
+        seen[l] = true; const o = nodeById(l); if (o) next.push(o);
+        if (state.map.revealed.indexOf(l) < 0) state.map.revealed.push(l);
+      }
+      frontier = next;
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Factions, events & quests
@@ -290,10 +337,12 @@
   function eventAPI() {
     const run = state.run;
     return {
-      has: (trait) => run.crew.some((c) => c.trait === trait),
+      has: (trait) => run.crew.some((c) => hasTrait(c, trait)),
+      skillAtLeast: (key, n) => run.crew.some((c) => (c.skills[key] || 0) >= n),
       gold: (n) => { run.gold = Math.max(0, run.gold + n); },
       supplies: (n) => { run.supplies = Math.max(0, run.supplies + n); },
       rep: (f, n) => repChange(f, n),
+      morale: (n) => changeMorale(n),
       notor: (n) => { run.notoriety = clamp(run.notoriety + n, 0, 200); },
       damage: (area, n) => { run.areas[area] = clamp((run.areas[area] || 0) - n, 0, T.areaMax); },
       repair: (area, n) => { run.areas[area] = clamp((run.areas[area] || 0) + n, 0, T.areaMax); },
@@ -409,19 +458,24 @@
     }
     // Overwork drift once you've been at sea too long without shore leave.
     if (state.run.legsSincePort > T.overworkGraceLegs) changeMorale(-T.moraleOverwork);
+    state.run.legsSinceShare = (state.run.legsSinceShare || 0) + 1;
+    // Loyal hands steady the crew each leg.
+    changeMorale(crewTraitSum(state.run, "moraleAura"));
     // Wounded mend between fights; the whole crew learns the sea.
     healCrewOverLeg();
     for (const c of state.run.crew) gainSkill(c, "navigation", T.xpNavPerLeg * (officerFactor("navigator") ? 1.5 : 1));
     state.map.current = id;
     if (!state.map.revealed.includes(id)) state.map.revealed.push(id);
     const n = nodeById(id);
-    for (const l of n.links) if (!state.map.revealed.includes(l)) state.map.revealed.push(l);
+    revealFrom(n, 1 + T.scoutHops * ((crewHasTrait(state.run, "sharpeyed") || officerHolder("navigator")) ? 1 : 0));
+    // Bloodthirsty hands sour on a leg with no fight to be had.
+    if (n.type !== "enemy") changeMorale(-crewTraitSum(state.run, "quietLegMorale"));
     save();
     // A restless crew may rise up before the destination even matters.
-    if (state.run.morale < T.mutinyThreshold &&
-        Math.random() < (T.mutinyThreshold - state.run.morale) * T.mutinyChancePerPoint) {
-      openEvent(mutinyEvent()); return;
-    }
+    let mutiny = (T.mutinyThreshold - state.run.morale) * T.mutinyChancePerPoint;
+    mutiny *= (1 - Math.min(0.7, crewTraitMax(state.run, "mutinyResist")));   // Loyal steadies
+    if (state.run.legsSinceShare > T.greedyStaleLegs) mutiny += crewTraitCount(state.run, "demandsShares") * T.greedyMutinyBump;
+    if (state.run.morale < T.mutinyThreshold && Math.random() < mutiny) { openEvent(mutinyEvent()); return; }
     // Delivery quests complete on arrival at their destination port.
     const arrived = checkArrivalQuests(n);
     // Resolve the destination encounter.
@@ -628,18 +682,20 @@
       cn.loaded = false;
       cn.reloadMax = cannonReloadTime(cn, attacker.isPlayer);
       cn.reload = cn.reloadMax;
-      if (attacker.isPlayer && !cn.gunner._npc)
-        cn.gunner.skills.gunnery = Math.min(T.skillMax, (cn.gunner.skills.gunnery || 0) + T.gunneryXpPerFire);
+      if (attacker.isPlayer && !cn.gunner._npc) gainSkill(cn.gunner, "gunnery", T.gunneryXpPerFire);
+      // A Drunkard gunner may fumble the shot entirely.
+      if (attacker.isPlayer) { const mis = traitSum(cn.gunner, "misfire"); if (mis > 0 && Math.random() < mis) continue; }
       if (!bears || !inRange) continue;   // fired, but no arc/range → all miss
       let acc = T.accuracyBase * (1 - rangeFrac * T.accuracyRangeFalloff)
         * (1 - motionFrac * T.accuracyMotionPenalty) * (1 + T.gunnerAccK * cannonSkill(cn));
-      if (attacker.isPlayer) acc += officerAdd("master_gunner", "accBonus");
+      if (attacker.isPlayer) acc += officerAdd("master_gunner", "accBonus") + traitSum(cn.gunner, "acc");  // Master Gunner + Crack Shot
       if (Math.random() < clamp(acc, 0.05, 0.96)) hits++;
     }
     if (fired === 0) return 0;
     const who = attacker.isPlayer ? "Your" : "Enemy";
     if (hits > 0) {
-      const dmg = hits * shotKind.base * (shotKind.bias[targetArea] || 0.7);
+      let dmg = hits * shotKind.base * (shotKind.bias[targetArea] || 0.7);
+      if (defender.isPlayer) dmg *= (1 - crewTraitMax(state.run, "areaResist"));   // Handy shores up the timbers
       defender.areas[targetArea] = Math.max(0, defender.areas[targetArea] - dmg);
       const casChance = shotKind.casualty * (targetArea === "deck" ? 1.5 : 1) * hits * 0.5;
       if (Math.random() < casChance) applyCasualty(defender);
@@ -777,7 +833,9 @@
     let meleeMult = 1;
     if (state.run.captain && D.CAPTAIN_TRAITS[state.run.captain].perk.meleeMult)
       meleeMult = D.CAPTAIN_TRAITS[state.run.captain].perk.meleeMult;
-    const pStr = state.run.crew.reduce((s, c) => s + meleePower(c), 0)
+    // Cowards fight at a discount when the enemy outnumbers your boarders.
+    const outnum = b.enemy.crew > crewAlive();
+    const pStr = state.run.crew.reduce((s, c) => s + meleePower(c) * (outnum && traitAnyBool(c, "cowardly") ? 0.6 : 1), 0)
       * meleeMult * (1 + officerAdd("quartermaster", "boardBonus"));   // Quartermaster leads the charge
     const eStr = b.enemy.crew * (T.meleeBase + b.enemy.gunnery) * (b.enemy.surrendered ? 0.4 : 1);
     b.boarding = {
@@ -813,8 +871,10 @@
     if (b.outcome) return;
     const tmpl = b.tmpl;
     let gold = 0, supplies = 0, recruited = null, title = "", lines = [];
+    // Greedy hands sniff out extra loot on a capture (capped).
+    const lootMult = 1 + Math.min(0.6, crewTraitSum(state.run, "lootMult"));
     if (kind === "captured") {
-      gold = Math.round(tmpl.gold * 1.0 + 40);
+      gold = Math.round((tmpl.gold * 1.0 + 40) * lootMult);
       supplies = tmpl.supplies + 2;
       title = "Prize Taken!";
       lines.push("You storm the deck and take her whole. The hold is yours.");
@@ -839,7 +899,8 @@
     if (b.enemy.surrendered && kind === "sunk") lines.push("(They had struck — boarding would have paid more.)");
     // Faction consequences + any bounty on this foe.
     applyEnemyRep(tmpl);
-    changeMorale(kind === "captured" ? T.moraleCapture : T.moraleWin);   // a win lifts spirits
+    // A win lifts spirits — the bloodthirsty most of all.
+    changeMorale((kind === "captured" ? T.moraleCapture : T.moraleWin) + crewTraitSum(state.run, "moraleWinBonus"));
     if (tmpl.faction === "navy") lines.push("Word spreads: the brethren toast you; the Crown does not.");
     for (const bq of checkBountyQuests(tmpl.key)) lines.push.apply(lines, bq.lines);
     state.run.gold += gold; state.run.supplies += supplies;
@@ -1010,7 +1071,7 @@
         const canRum = r.supplies >= T.rumRationSupplies;
         if (button(360, H - 38, 190, 26, "Rum ration (−" + T.rumRationSupplies + " supplies)", { size: 12, disabled: !canRum, bg: C.panelLt })) {
           if (canRum) { r.supplies -= T.rumRationSupplies; changeMorale(T.rumRationMorale);
-            for (const c of r.crew) if (D.TRAITS[c.trait].rumLove) c.loyalty = clamp((c.loyalty || 0) + 8, 0, 100); save(); }
+            for (const c of r.crew) if (traitAnyBool(c, "rumLove")) c.loyalty = clamp((c.loyalty || 0) + 8, 0, 100); save(); }
         }
         text("Click a glowing port to sail there.", W - 24, H - 24, 14, C.dim, "right", "italic");
         if (state.flash > 0) { state.flash -= 0.02; text("A hand starved — supplies ran dry!", W / 2, H - 100, 16, C.danger, "center", "bold"); }
@@ -1249,10 +1310,10 @@
       const seld = b.sel === c;
       if (inRect(cx, ry, 244, 15)) { ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fillRect(cx, ry, 244, 15); if (mouse.clicked) { mouse.clicked = false; b.sel = seld ? null : c; } }
       if (seld) { ctx.strokeStyle = C.hi; ctx.lineWidth = 1; ctx.strokeRect(cx, ry, 244, 15); }
-      const hp = c.hp == null ? 100 : c.hp;
+      const mhp = c.maxHp || 100, hp = c.hp == null ? mhp : c.hp, wounded = hp < mhp;
       const nm = c.name.length > 15 ? c.name.slice(0, 14) + "…" : c.name;
-      const nmCol = seld ? C.hi : hp < 40 ? C.danger : hp < 100 ? C.gold : C.text;
-      text((seld ? "▸ " : "") + nm + (hp < 100 ? " ✚" : ""), cx + 4, ry + 12, 12, nmCol);
+      const nmCol = seld ? C.hi : hp < 0.4 * mhp ? C.danger : wounded ? C.gold : C.text;
+      text((seld ? "▸ " : "") + nm + (wounded ? " ✚" : ""), cx + 4, ry + 12, 12, nmCol);
       text(rankOf(c.skills.gunnery || 0).tag, cx + 172, ry + 12, 11, C.dim);
       text(crewPostLabel(c), cx + 206, ry + 12, 11, C.gold);
     }
@@ -1401,10 +1462,11 @@
     text("Recruit a hand", 70, 205, 20, C.text, "left", "bold");
     const c = P.recruit;
     panel(70, 225, 360, 200, C.panelLt);
-    text(c.name, 90, 258, 20, C.hi, "left", "bold");
-    text(D.TRAITS[c.trait].label + " — " + D.TRAITS[c.trait].blurb, 90, 285, 14, C.gold, "left", "italic");
-    let sy = 312;
-    for (const s of D.SKILLS) { const v = c.skills[s] || 0; text(s + ": " + rankOf(v).label + (v >= 3.5 ? " ★" : ""), 90, sy, 14, v >= 3.5 ? C.green : C.text); sy += 20; }
+    text(c.name, 90, 256, 20, C.hi, "left", "bold");
+    text("Quirks: " + traitLabels(c), 90, 280, 14, C.gold, "left", "italic");
+    text((D.TRAITS[c.traits[0]] || {}).blurb || "", 90, 298, 12, C.dim, "left", "italic");
+    let sy = 316;
+    for (const s of D.SKILLS) { const v = c.skills[s] || 0; text(s + ": " + rankOf(v).label + (v >= 3.5 ? " ★" : ""), 90, sy, 13, v >= 3.5 ? C.green : C.text); sy += 17; }
     const cap = D.SHIP_CLASSES[r.shipClass].crewCap;
     const full = r.crew.length >= cap;
     const recruitCost = Math.round(D.PORT.recruitCost * priceMult());
@@ -1417,7 +1479,7 @@
     text("Your crew (" + r.crew.length + "):", 460, 300, 16, C.text, "left", "bold");
     let cy = 326;
     for (const m of r.crew.slice(0, 7)) {
-      text("• " + m.name + " — " + D.TRAITS[m.trait].label + " · " + D.WEAPONS[m.weapon].label, 470, cy, 13, C.dim);
+      text("• " + m.name + " — " + traitLabels(m), 470, cy, 13, C.dim);
       cy += 19;
     }
     if (r.crew.length > 7) text("…and " + (r.crew.length - 7) + " more", 470, cy, 13, C.dim);
@@ -1507,7 +1569,7 @@
     // Global actions.
     const dp = dividePlunderCost();
     if (button(W - 372, 178, 176, 30, "Divide plunder (" + dp + "g)", { size: 12, disabled: r.gold < dp, bg: C.panelLt })) {
-      if (r.gold >= dp) { r.gold -= dp; changeMorale(T.shareMorale); for (const c of r.crew) c.loyalty = clamp((c.loyalty || 0) + 8, 0, 100); save(); }
+      if (r.gold >= dp) { r.gold -= dp; changeMorale(T.shareMorale); r.legsSinceShare = 0; for (const c of r.crew) c.loyalty = clamp((c.loyalty || 0) + 8, 0, 100); save(); }
     }
     const tw = tendWoundedCost();
     if (button(W - 188, 178, 150, 30, tw > 0 ? "Tend wounded (" + tw + "g)" : "No wounded", { size: 12, disabled: tw <= 0 || r.gold < tw, bg: C.panelLt })) {
@@ -1521,11 +1583,11 @@
       if (inRect(52, rowY, W - 104, 30)) { ctx.fillStyle = "rgba(255,255,255,0.05)"; ctx.fillRect(52, rowY, W - 104, 30); if (mouse.clicked) { mouse.clicked = false; P.sel = sel ? null : c; } }
       if (sel) { ctx.strokeStyle = C.hi; ctx.lineWidth = 1; ctx.strokeRect(52, rowY, W - 104, 30); }
       text(c.name, 62, rowY + 14, 14, sel ? C.hi : C.text, "left", "bold");
-      text(D.TRAITS[c.trait].label + (c.role ? " · " + D.OFFICER_ROLES[c.role].label : ""), 62, rowY + 27, 11, c.role ? C.gold : C.dim);
+      text(traitLabels(c) + (c.role ? " · " + D.OFFICER_ROLES[c.role].label : ""), 62, rowY + 27, 11, c.role ? C.gold : C.dim);
       let sx = 250;
       for (const s of D.SKILLS) { const v = c.skills[s] || 0; text(SKILL_SHORT[s] + " " + rankOf(v).tag, sx, rowY + 18, 11, v >= 3.5 ? C.green : C.dim); sx += 70; }
-      const hp = c.hp == null ? 100 : c.hp;
-      bar(W - 250, rowY + 9, 84, 10, hp / 100, hp > 60 ? C.green : hp > 30 ? C.gold : C.danger);
+      const hp = c.hp == null ? 100 : c.hp, mhp = c.maxHp || 100;
+      bar(W - 250, rowY + 9, 84, 10, hp / mhp, hp > 0.6 * mhp ? C.green : hp > 0.3 * mhp ? C.gold : C.danger);
       text("Loy " + Math.round(c.loyalty || 0), W - 156, rowY + 18, 11, (c.loyalty || 0) < 40 ? C.danger : C.dim);
       y += 34;
     }
@@ -1568,7 +1630,7 @@
   // Debug/testing surface (harmless in play — nothing calls it automatically).
   window.BLACKTIDE = {
     get state() { return state; }, D,
-    api: { sailTo, openEvent, rollEvent, addQuest, buildPort, startBattle, officerMult, rankOf },
+    api: { sailTo, openEvent, rollEvent, addQuest, buildPort, startBattle, officerMult, officerFactor, meleePower, rankOf },
   };
   requestAnimationFrame(frame);
 })();

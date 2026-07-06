@@ -65,11 +65,17 @@ Checks every data record's shape and the core battle-math invariants
 - **Quests & factions** — take contracts (bounty / delivery / treasure) from port rumour
   boards; your deeds shift standing with the **Navy, Merchant Guild, and Pirate
   Brethren**, which colours prices and what's on offer.
-- **A deep crew** — every named hand **levels the skill they work** (Green → Able → Salt →
-  Master); takes **wounds** that heal over voyages (faster with a surgeon) and can **die**;
-  and has **morale & loyalty** — win, plunder, and pour a **rum ration** to keep spirits up,
-  or face a **mutiny** when it bottoms out. Promote **officers** (Quartermaster, Boatswain,
-  Master Gunner, Ship's Doctor, Navigator) for ship-wide bonuses, and manage it all from the
+- **A deep crew** — no fixed jobs: a hand's competence is the **skills they level by doing**
+  (Green → Able → Salt → Master). What sets them apart are **quirks** — Brawler, Crack Shot,
+  Tough, Coward, Bloodthirsty, Drunkard, Sawbones, Handy, Sea Legs, Sharp-Eyed, Quick Study,
+  Loyal, Greedy — wired into **combat** (a Coward wavers when outnumbered, a Drunkard's gun
+  may misfire), **at-sea life** (Sawbones mends the wounded, Quick Study learns faster,
+  Sharp-Eyed scouts further), **morale & mutiny** (Loyal steadies the crew, Greedy demands
+  their cut), and **events** (quirk-gated choices and quirk-driven scenes).
+- Hands take **wounds** that heal over voyages and can **die**; ship **morale & loyalty**
+  swing with wins, plunder, a **rum ration**, and hardship, and bottom out into a **mutiny**.
+  Appoint **officers** (Quartermaster, Boatswain, Master Gunner, Ship's Doctor, Navigator) —
+  their strength scales with their **skill** in that craft — and manage everything from the
   port **Crew** tab (promote / arm / dismiss / divide the plunder / tend the wounded).
 - **Roguelike economy** — gold, supplies, crew, ship condition; permadeath; reach the
   retire-gold goal at any port to win the run.

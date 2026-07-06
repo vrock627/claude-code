@@ -46,11 +46,18 @@ for (const want of ["sails", "helm", "pumps"]) check(STATION_KEYS.has(want), `st
 check(!STATION_KEYS.has("guns"), "'guns' should no longer be a station (cannons are per-gun manned)");
 for (const st of D.STATIONS) check(SKILL.has(st.skill), `station ${st.key}: skill ${st.skill} unknown`);
 
-// --- TRAITS / CAPTAIN / WEAPONS ---
+// --- TRAITS (quirks) / CAPTAIN / WEAPONS ---
+const EFFECT_FIELDS = new Set(["skillAffinity", "board", "acc", "maxHp", "misfire", "xpMult",
+  "healPerLeg", "repairMult", "areaResist", "stormImmune", "ambushDodge", "scout", "loy",
+  "moraleAura", "mutinyResist", "rumLove", "lootMult", "demandsShares", "moraleWinBonus",
+  "quietLegMorale", "cowardly"]);
 for (const k of Object.keys(D.TRAITS)) {
   const t = D.TRAITS[k];
   check(t.key === k && t.label && t.blurb, `trait ${k}: missing meta`);
-  for (const mk of Object.keys(t.mods || {})) check(SKILL.has(mk), `trait ${k}: mod targets unknown skill ${mk}`);
+  check(t.effects && typeof t.effects === "object", `trait ${k}: needs an effects block`);
+  check(Object.keys(t.effects).length >= 1, `trait ${k}: needs at least one effect`);
+  for (const f of Object.keys(t.effects || {})) check(EFFECT_FIELDS.has(f), `trait ${k}: unknown effect field ${f}`);
+  for (const mk of Object.keys((t.effects || {}).skillAffinity || {})) check(SKILL.has(mk), `trait ${k}: skillAffinity targets unknown skill ${mk}`);
 }
 for (const k of Object.keys(D.CAPTAIN_TRAITS)) {
   const ct = D.CAPTAIN_TRAITS[k];
@@ -86,13 +93,14 @@ for (const k of Object.keys(D.ENEMIES)) check(!D.ENEMIES[k].faction || FACTION_K
 // --- EVENTS: exercise every cond/req/effect against a mock run + helper API ---
 function mockRun() {
   return {
-    gold: 100, supplies: 10, notoriety: 0, areas: { hull: 100, masts: 100, rudder: 100, guns: 100, deck: 100 },
-    crew: [{ trait: "surgeon", skills: {} }, { trait: "sailor", skills: {} }, { trait: "brawler", skills: {} }],
+    gold: 100, supplies: 10, notoriety: 0, morale: 65, areas: { hull: 100, masts: 100, rudder: 100, guns: 100, deck: 100 },
+    // crew carry quirk `traits` arrays so cond gates (drunkard/greedy…) can pass.
+    crew: [{ traits: ["drunkard"], skills: {} }, { traits: ["greedy", "sealegs"], skills: {} }, { traits: ["loyal", "sawbones"], skills: { medicine: 4 } }],
     rep: { navy: 0, merchants: 0, brethren: 0 }, flags: {}, quests: [], questsDone: [],
   };
 }
 const mockH = {
-  has: () => true, gold: () => {}, supplies: () => {}, rep: () => {}, notor: () => {},
+  has: () => true, skillAtLeast: () => true, gold: () => {}, supplies: () => {}, rep: () => {}, morale: () => {}, notor: () => {},
   damage: () => {}, repair: () => {}, flag: () => {}, hasFlag: () => false,
   addQuest: () => {}, addCrew: () => "New Hand", loseCrew: () => "Old Hand",
 };
@@ -144,11 +152,16 @@ const TRAIT_KEYS = new Set(Object.keys(D.TRAITS));
 for (const k of Object.keys(D.OFFICER_ROLES)) {
   const o = D.OFFICER_ROLES[k];
   check(o.key === k && o.label && o.blurb, `officer ${k}: missing meta`);
-  check(TRAIT_KEYS.has(o.trait), `officer ${k}: matching trait ${o.trait} unknown`);
-  // has at least one numeric effect field beyond key/label/trait/blurb
-  const fx = Object.keys(o).filter((f) => !["key", "label", "trait", "blurb"].includes(f) && typeof o[f] === "number");
+  check(SKILL.has(o.skill), `officer ${k}: scaling skill ${o.skill} unknown`);
+  // has at least one numeric effect field beyond key/label/skill/blurb
+  const fx = Object.keys(o).filter((f) => !["key", "label", "skill", "blurb"].includes(f) && typeof o[f] === "number");
   check(fx.length >= 1, `officer ${k}: needs at least one numeric effect`);
 }
+// officerFactor rises with the appointee's skill (mirror of game.js).
+const offFactor = (sk) => Math.max(D.TUNING.officerFloor, Math.min(1, D.TUNING.officerFloor + (1 - D.TUNING.officerFloor) * (sk / D.TUNING.officerRefSkill)));
+check(offFactor(0) === D.TUNING.officerFloor, "a green officer gives the floor effect");
+check(offFactor(D.TUNING.officerRefSkill) === 1, "a master officer gives full effect");
+check(offFactor(5) > offFactor(1), "officer effect must rise with skill");
 
 // --- crew-depth math sanity ---
 const Tu = D.TUNING;
@@ -165,7 +178,7 @@ check(Tu.startMorale > 0 && Tu.startMorale <= Tu.moraleMax, "startMorale within 
 check(Tu.mutinyThreshold > 0 && Tu.mutinyThreshold < Tu.startMorale, "mutiny threshold below starting morale");
 check(Tu.mutinyChancePerPoint > 0 && Tu.mutinyChancePerPoint < 1, "mutiny chance per point in (0,1)");
 // drunkard flavour used by the rum ration
-check(D.TRAITS.drunkard && D.TRAITS.drunkard.rumLove, "drunkard should love a rum ration");
+check(D.TRAITS.drunkard && D.TRAITS.drunkard.effects.rumLove, "drunkard should love a rum ration");
 
 // --- TUNING presence ---
 const TUNE_KEYS = ["startGold", "startSupplies", "startCrew", "supplyPerLeg", "arenaW", "arenaH",
@@ -177,7 +190,8 @@ const TUNE_KEYS = ["startGold", "startSupplies", "startCrew", "supplyPerLeg", "a
   "woundGrape", "woundBoardScale", "healBase", "healPerMedicine", "infirmaryCostPerHp",
   "startMorale", "moraleMax", "moraleWin", "moraleCapture", "moraleTreasure", "moraleLoss", "moraleLostHand",
   "moraleStarve", "moraleOverwork", "overworkGraceLegs", "rumRationSupplies", "rumRationMorale",
-  "sharePerCrew", "shareMorale", "loyaltyStart", "mutinyThreshold", "mutinyChancePerPoint"];
+  "sharePerCrew", "shareMorale", "loyaltyStart", "mutinyThreshold", "mutinyChancePerPoint",
+  "officerRefSkill", "officerFloor", "greedyMutinyBump", "greedyStaleLegs", "scoutHops"];
 for (const k of TUNE_KEYS) check(typeof D.TUNING[k] === "number", `TUNING.${k} missing/not a number`);
 const T = D.TUNING;
 check(T.windMinFactor < T.windMaxFactor, "windMinFactor must be < windMaxFactor");

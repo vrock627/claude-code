@@ -13,7 +13,10 @@ port rumour boards; standing with the Navy, Merchant Guild, and Pirate Brethren 
 prices and offers), and a **deep crew** layer (every skill levels into ranks Green→Master;
 persistent wounds that heal over voyages, with permadeath; ship morale, per-hand loyalty, and
 mutiny; promotable officer roles granting ship-wide bonuses; and a port crew-management
-screen).
+screen). Crew have **no fixed jobs** — competence is purely the skills a hand levels — and
+their character comes from **quirks** (Brawler, Coward, Drunkard, Sawbones, Quick Study,
+Loyal, Greedy, …) wired into combat, at-sea passives, morale/mutiny, and events; officer
+strength scales with the appointee's skill in that craft.
 
 ---
 

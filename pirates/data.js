@@ -54,16 +54,32 @@
 
   const SKILLS = ["gunnery", "sailing", "repair", "melee", "medicine", "navigation"];
 
-  // Crew traits — innate modifiers. `mods` adjust skills; `melee`/`reload`/etc.
-  // are flat multipliers/bonuses read by the engine.
+  // Crew traits are personality/ability QUIRKS — not jobs. A hand's competence at
+  // any task comes from the skills they level by doing it (see SKILLS); quirks
+  // modify their overall abilities. Each hand carries 1–2 of these. The engine
+  // reads the typed fields in `effects` (see traitSum/hasTrait in game.js):
+  //   skillAffinity {skill:+n}  starting-skill lean (an aptitude, not a job)
+  //   board  +/- boarding melee    acc  +gunnery accuracy   maxHp +hp ceiling
+  //   misfire chance a shot is lost   xpMult faster learning (all skills)
+  //   healPerLeg extra ship-wide healing   repairMult cheaper repairs
+  //   areaResist less incoming area damage   stormImmune  ambushDodge/scout
+  //   loy starting-loyalty lean   moraleAura per-leg morale   mutinyResist
+  //   rumLove   lootMult capture gold   demandsShares (greed → mutiny if unpaid)
+  //   moraleWinBonus / quietLegMorale (bloodthirsty)
   const TRAITS = {
-    brawler:  { key: "brawler",  label: "Brawler",   blurb: "Lethal in a boarding fight.",      mods: { melee: 2 } },
-    gunner:   { key: "gunner",   label: "Master Gunner", blurb: "Loads and aims fast.",          mods: { gunnery: 2 } },
-    carpenter:{ key: "carpenter",label: "Carpenter", blurb: "Patches hull, fights floods.",      mods: { repair: 2 } },
-    surgeon:  { key: "surgeon",  label: "Surgeon",   blurb: "Keeps the wounded breathing.",      mods: { medicine: 2 } },
-    sailor:   { key: "sailor",   label: "Old Salt",  blurb: "Reads wind and sail by instinct.",  mods: { sailing: 2 } },
-    lookout:  { key: "lookout",  label: "Lookout",   blurb: "Eagle-eyed; sees trouble early.",   mods: { navigation: 2 } },
-    drunkard: { key: "drunkard", label: "Drunkard",  blurb: "Cheap and merry, but unreliable.",  mods: { melee: 1, gunnery: -1 }, loy: -8, rumLove: true },
+    brawler:      { key: "brawler",      label: "Brawler",      blurb: "Lethal in a boarding fight.",             effects: { board: 0.15, skillAffinity: { melee: 2 } } },
+    crackshot:    { key: "crackshot",    label: "Crack Shot",   blurb: "A deadeye at the guns.",                  effects: { acc: 0.05, skillAffinity: { gunnery: 2 } } },
+    tough:        { key: "tough",        label: "Tough",        blurb: "Hard to put down; soaks up wounds.",      effects: { maxHp: 40 } },
+    coward:       { key: "coward",       label: "Coward",       blurb: "Wavers when the odds turn against you.",  effects: { board: -0.12, cowardly: true } },
+    bloodthirsty: { key: "bloodthirsty", label: "Bloodthirsty", blurb: "Lives for the fight; restless in calm.",  effects: { board: 0.05, moraleWinBonus: 5, quietLegMorale: 2 } },
+    drunkard:     { key: "drunkard",     label: "Drunkard",     blurb: "Merry and cheap, but unreliable.",        effects: { misfire: 0.10, loy: -8, rumLove: true } },
+    sawbones:     { key: "sawbones",     label: "Sawbones",     blurb: "A knack for keeping the wounded alive.",  effects: { healPerLeg: 6, skillAffinity: { medicine: 2 } } },
+    handy:        { key: "handy",        label: "Handy",        blurb: "Patches the ship quick and cheap.",       effects: { repairMult: 0.85, areaResist: 0.12, skillAffinity: { repair: 2 } } },
+    sealegs:      { key: "sealegs",      label: "Sea Legs",     blurb: "Unbothered by storm or dead calm.",       effects: { stormImmune: true, skillAffinity: { sailing: 2 } } },
+    sharpeyed:    { key: "sharpeyed",    label: "Sharp-Eyed",   blurb: "Spots trouble — and treasure — early.",   effects: { ambushDodge: 0.5, scout: true, skillAffinity: { navigation: 2 } } },
+    quickstudy:   { key: "quickstudy",   label: "Quick Study",  blurb: "Learns any craft in half the time.",      effects: { xpMult: 0.6 } },
+    loyal:        { key: "loyal",        label: "Loyal",        blurb: "Steadies the crew; won't turn on you.",   effects: { loy: 18, moraleAura: 2, mutinyResist: 0.4 } },
+    greedy:       { key: "greedy",       label: "Greedy",       blurb: "Sharp nose for loot — and for their cut.", effects: { lootMult: 0.15, demandsShares: true, loy: -6 } },
   };
 
   // Skill ranks: a skill value maps to the highest rank whose `min` it meets.
@@ -75,15 +91,16 @@
     { min: 5.5, label: "Master", tag: "Mst" },
   ];
 
-  // Officer roles — one holder each (stored as crew.role). Full effect when the
-  // holder has the matching `trait`, reduced otherwise. Engine reads the numeric
-  // fields; see officerFactor/officer* in game.js.
+  // Officer roles — an appointment, one holder each (stored as crew.role). Since
+  // there are no jobs, an officer's strength scales with their level in the
+  // relevant `skill` (green ≈ 0.3 → master ≈ 1.0). Engine reads the numeric
+  // effect fields; see officerFactor/officer* in game.js.
   const OFFICER_ROLES = {
-    quartermaster: { key: "quartermaster", label: "Quartermaster", trait: "brawler", blurb: "Keeps order; steadier morale, fiercer boarding.", moraleDecayMult: 0.5, boardBonus: 0.15 },
-    boatswain:     { key: "boatswain",     label: "Boatswain",     trait: "sailor",  blurb: "Drives the rigging; more speed and sharper turns.", sailMult: 1.18 },
-    master_gunner: { key: "master_gunner", label: "Master Gunner", trait: "gunner",  blurb: "Runs the gun deck; quicker reloads, better aim.", reloadMult: 0.9, accBonus: 0.04 },
-    ships_doctor:  { key: "ships_doctor",  label: "Ship's Doctor", trait: "surgeon", blurb: "Runs the cockpit; the wounded mend faster.", healMult: 1.7, saveChance: 0.45 },
-    navigator:     { key: "navigator",     label: "Navigator",     trait: "lookout", blurb: "Reads chart and sky; thriftier, safer voyages.", supplyPerLeg: -1, scout: 1 },
+    quartermaster: { key: "quartermaster", label: "Quartermaster", skill: "melee",      blurb: "Keeps order; steadier morale, fiercer boarding.", moraleDecayMult: 0.5, boardBonus: 0.15 },
+    boatswain:     { key: "boatswain",     label: "Boatswain",     skill: "sailing",    blurb: "Drives the rigging; more speed and sharper turns.", sailMult: 1.18 },
+    master_gunner: { key: "master_gunner", label: "Master Gunner", skill: "gunnery",    blurb: "Runs the gun deck; quicker reloads, better aim.", reloadMult: 0.9, accBonus: 0.04 },
+    ships_doctor:  { key: "ships_doctor",  label: "Ship's Doctor", skill: "medicine",   blurb: "Runs the cockpit; the wounded mend faster.", healMult: 1.7, saveChance: 0.45 },
+    navigator:     { key: "navigator",     label: "Navigator",     skill: "navigation", blurb: "Reads chart and sky; thriftier, safer voyages.", supplyPerLeg: -1, scout: 1 },
   };
 
   // Captain backgrounds chosen at creation. Grants a crew-wide perk.
@@ -154,7 +171,7 @@
       text: "Spars and shattered planking drift on the tide — a ship died here recently.",
       options: [
         { label: "Salvage what floats", effect: (run, H) => { const g = 20 + Math.floor(Math.random() * 40); H.gold(g); const l = ["You pull " + g + " gold of goods from the wrack."]; if (Math.random() < 0.3) { H.damage("hull", 12); l.push("A jagged timber gouges your hull below the waterline."); } return { lines: l }; } },
-        { label: "Search for survivors", req: (run, H) => H.has("surgeon"), reqText: "needs a Surgeon", effect: (run, H) => { const nm = H.addCrew(); return { lines: [nm ? ("Your surgeon coaxes life back into a half-drowned sailor: " + nm + ".") : "You find one alive, but your decks are full."] }; } },
+        { label: "Search for survivors", req: (run, H) => H.has("sawbones") || H.skillAtLeast("medicine", 3), reqText: "needs a Sawbones or a skilled medic", effect: (run, H) => { const nm = H.addCrew(); return { lines: [nm ? ("A steady hand coaxes life back into a half-drowned sailor: " + nm + ".") : "You find one alive, but your decks are full."] }; } },
         { label: "Leave it be", effect: () => ({ lines: ["Bad luck to loot the drowned, some say. You pass on."] }) },
       ],
     },
@@ -174,7 +191,7 @@
       text: "The wind dies. Sails hang limp under a white sky.",
       options: [
         { label: "Wait it out", effect: (run, H) => { H.supplies(-2); return { lines: ["Two days of still air and dwindling water before the breeze returns."] }; } },
-        { label: "Man the sweeps (Old Salt)", req: (run, H) => H.has("sailor"), reqText: "needs an Old Salt", effect: () => ({ lines: ["Your old salt finds a cat's-paw of wind and works you clear."] }) },
+        { label: "Let the Sea Legs read the water", req: (run, H) => H.has("sealegs"), reqText: "needs a Sea Legs hand", effect: () => ({ lines: ["Your sea-legged hand finds a cat's-paw of wind and works you clear."] }) },
       ],
     },
     bottle: {
@@ -191,7 +208,7 @@
       title: "Fever Below Decks",
       text: "A sweating sickness spreads in the forecastle.",
       options: [
-        { label: "Physic the sick (Surgeon)", req: (run, H) => H.has("surgeon"), reqText: "needs a Surgeon", effect: () => ({ lines: ["Your surgeon breaks the fever. All hands pull through."] }) },
+        { label: "Physic the sick", req: (run, H) => H.has("sawbones") || H.skillAtLeast("medicine", 3), reqText: "needs a Sawbones or a skilled medic", effect: () => ({ lines: ["A skilled hand breaks the fever. All hands pull through."] }) },
         { label: "Dose them with rum and hope", effect: (run, H) => { if (Math.random() < 0.5) return { lines: ["The fever passes on its own. Lucky."] }; const nm = H.loseCrew(); return { lines: [(nm || "A hand") + " doesn't see the morning. Buried at sea."] }; } },
       ],
     },
@@ -202,6 +219,37 @@
       options: [
         { label: "Share a drink and news", effect: (run, H) => { H.rep("brethren", 4); H.supplies(2); return { lines: ["You trade rumours and rum. The brethren remember friends."] }; } },
         { label: "Demand tribute", effect: (run, H) => { if (Math.random() < 0.5) { H.gold(45); return { lines: ["They pay rather than bleed. 45 gold."] }; } H.rep("brethren", -4); return { lines: ["They laugh and sheer off, insulted."] }; } },
+      ],
+    },
+    // --- Quirk-driven events (gated by who's aboard) ---
+    broached_rum: {
+      id: "broached_rum", weight: 5, cond: (run) => run.crew.some((c) => (c.traits || []).includes("drunkard")),
+      title: "The Rum's Gone",
+      text: "The rum cask is dry a week early. All eyes turn to the ship's known drunkard, grinning sheepishly.",
+      options: [
+        { label: "Flog them as an example", effect: (run, H) => { H.morale(-6); return { lines: ["Discipline is kept, but it's a grim morning. The crew mutters."] }; } },
+        { label: "Laugh it off and share what's left", effect: (run, H) => { H.morale(6); H.supplies(-1); return { lines: ["You make a joke of it. The hands love you the more for it."] }; } },
+        { label: "Dock it from their share", effect: (run, H) => { H.gold(10); return { lines: ["A quiet word and a lighter purse for the culprit. 10 gold recouped."] }; } },
+      ],
+    },
+    red_sky: {
+      id: "red_sky", weight: 6,
+      title: "Red Sky at Morning",
+      text: "The dawn comes up blood-red and the old hands go quiet. Sailors take such omens to heart.",
+      options: [
+        { label: "Steady them — an old salt reads the weather", req: (run, H) => H.has("sealegs"), reqText: "needs a Sea Legs hand", effect: () => ({ lines: ["Your sea-legged hand calls it plain weather, and the mood lifts."] }) },
+        { label: "A loyal hand leads a song", req: (run, H) => H.has("loyal"), reqText: "needs a Loyal hand", effect: (run, H) => { H.morale(5); return { lines: ["A trusted voice starts a shanty, and the omen is forgotten by noon."] }; } },
+        { label: "Say nothing and sail on", effect: (run, H) => { H.morale(-5); return { lines: ["You keep your counsel. The unease lingers below decks."] }; } },
+      ],
+    },
+    the_shares: {
+      id: "the_shares", weight: 5, cond: (run) => run.crew.some((c) => (c.traits || []).includes("greedy")),
+      title: "A Word About Shares",
+      text: "A greedy hand corners you: the plunder's been thin, and they want their cut — now.",
+      options: [
+        { label: "Pay a bonus from the chest (40g)", req: (run) => run.gold >= 40, reqText: "need 40 gold", effect: (run, H) => { H.gold(-40); H.morale(8); return { lines: ["Coin quiets the grumbling. For now, they're content."] }; } },
+        { label: "Promise them the next prize", effect: (run, H) => { H.morale(-4); return { lines: ["Fine words, no coin. Their eyes narrow — you'd best deliver."] }; } },
+        { label: "Put them in their place", effect: (run, H) => { H.morale(-8); return { lines: ["You face them down. It holds — but resentment festers."] }; } },
       ],
     },
   };
@@ -338,6 +386,13 @@
     loyaltyStart: 60,
     mutinyThreshold: 25,       // morale below this risks mutiny
     mutinyChancePerPoint: 0.012, // per point below threshold, per leg
+
+    // --- Quirk wiring (iteration 4) ---
+    officerRefSkill: 8,        // skill at which an officer gives ~full effect
+    officerFloor: 0.3,         // effect factor for a freshly-appointed (green) officer
+    greedyMutinyBump: 0.05,    // added mutiny chance per greedy hand once shares run stale
+    greedyStaleLegs: 4,        // legs without dividing plunder before greed bites
+    scoutHops: 1,             // extra map hops a Sharp-Eyed hand / Navigator reveals
   };
 
   window.PIRATEDATA = {
