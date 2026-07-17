@@ -31,13 +31,28 @@ check(Object.keys(D.SHOT_TYPES.round.bias).includes("hull"), "round-shot should 
 check(Object.keys(D.SHOT_TYPES.chain.bias).includes("masts"), "chain-shot should favor masts");
 check(Object.keys(D.SHOT_TYPES.grape.bias).includes("deck"), "grape-shot should favor deck");
 
-// --- SHIP CLASSES ---
+// --- SHIP CLASSES + ladder ---
 for (const k of Object.keys(D.SHIP_CLASSES)) {
   const sc = D.SHIP_CLASSES[k];
   check(sc.key === k, `ship ${k}: key mismatch`);
   for (const f of ["maxSpeed", "turnRate", "gunsPerSide", "crewCap", "crewIdeal", "gunRange", "length", "beam"])
     check(typeof sc[f] === "number" && sc[f] > 0, `ship ${k}: ${f} must be a positive number`);
   check(sc.crewIdeal * D.STATIONS.length <= sc.crewCap + D.STATIONS.length, `ship ${k}: crewIdeal vs cap sanity`);
+  // ladder economics
+  for (const f of ["tier", "cost", "sellValue"]) check(typeof sc[f] === "number" && sc[f] >= 0, `ship ${k}: ${f} must be a non-negative number`);
+  check(sc.sellValue < Math.max(1, sc.cost) || sc.cost === 0, `ship ${k}: sellValue should be below cost`);
+}
+check(D.SHIP_CLASSES.sloop.cost === 0, "the starting sloop must be free");
+// tiers unique; sorted by tier, guns + crew cap are non-decreasing
+check(Array.isArray(D.SHIP_LADDER) && D.SHIP_LADDER.length === Object.keys(D.SHIP_CLASSES).length, "SHIP_LADDER must list every class");
+const tiersSeen = new Set();
+let prevGuns = 0, prevCap = 0, prevTier = -1;
+for (const k of D.SHIP_LADDER) {
+  const sc = D.SHIP_CLASSES[k];
+  check(!tiersSeen.has(sc.tier), `duplicate ship tier ${sc.tier}`); tiersSeen.add(sc.tier);
+  check(sc.tier > prevTier, "SHIP_LADDER must be tier-ordered"); prevTier = sc.tier;
+  check(sc.gunsPerSide >= prevGuns, `ship ${k}: guns should not shrink up the ladder`); prevGuns = sc.gunsPerSide;
+  check(sc.crewCap >= prevCap, `ship ${k}: crew cap should not shrink up the ladder`); prevCap = sc.crewCap;
 }
 
 // --- STATIONS (non-gun; cannons are manned individually now) ---
@@ -191,7 +206,8 @@ const TUNE_KEYS = ["startGold", "startSupplies", "startCrew", "supplyPerLeg", "a
   "startMorale", "moraleMax", "moraleWin", "moraleCapture", "moraleTreasure", "moraleLoss", "moraleLostHand",
   "moraleStarve", "moraleOverwork", "overworkGraceLegs", "rumRationSupplies", "rumRationMorale",
   "sharePerCrew", "shareMorale", "loyaltyStart", "mutinyThreshold", "mutinyChancePerPoint",
-  "officerRefSkill", "officerFloor", "greedyMutinyBump", "greedyStaleLegs", "scoutHops"];
+  "officerRefSkill", "officerFloor", "greedyMutinyBump", "greedyStaleLegs", "scoutHops",
+  "notorCrewK", "notorGunneryEvery", "notorShipEvery", "notorGoldK", "notorPerWin", "notorNavyBonus", "notorHunted"];
 for (const k of TUNE_KEYS) check(typeof D.TUNING[k] === "number", `TUNING.${k} missing/not a number`);
 const T = D.TUNING;
 check(T.windMinFactor < T.windMaxFactor, "windMinFactor must be < windMaxFactor");
@@ -199,6 +215,17 @@ check(T.windMinFactor > 0, "windMinFactor must be > 0 (always some way to move)"
 check(T.gunArcDeg > 0 && T.gunArcDeg < 90, "gunArcDeg must be a sane half-arc (0..90)");
 check(T.accuracyBase > 0 && T.accuracyBase < 1, "accuracyBase must be 0..1");
 check(T.floodSink > 0, "floodSink must be > 0");
+
+// notoriety scaling: more notoriety ⇒ tougher (never weaker) enemies (mirror engine)
+const scaleCrew = (base, n) => Math.max(1, Math.round(base * (1 + n * T.notorCrewK)));
+const scaleGun = (base, n) => base + Math.floor(n / T.notorGunneryEvery);
+check(scaleCrew(4, 120) > scaleCrew(4, 0), "high notoriety must add enemy crew");
+check(scaleCrew(4, 120) >= scaleCrew(4, 0), "notoriety must never reduce enemy crew");
+check(scaleGun(1, 200) > scaleGun(1, 0), "high notoriety must add enemy gunnery");
+check(T.notorPerWin > 0 && T.notorPerWin < T.notorHunted, "a single win must not instantly make you hunted");
+// enemy ship upgrade stays within the ladder
+const tierUp = (i, steps) => Math.max(0, Math.min(D.SHIP_LADDER.length - 1, i + steps));
+check(tierUp(0, Math.floor(200 / T.notorShipEvery)) <= D.SHIP_LADDER.length - 1, "enemy ship upgrade must stay on the ladder");
 
 // --- Derived battle-math sanity (mirror engine formulas) ---
 function windFactor(headingMinusWind) {

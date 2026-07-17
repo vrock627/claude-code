@@ -531,8 +531,38 @@
     };
   }
 
+  // Bump a ship class up `steps` rungs of the ladder (clamped to the top).
+  function shipTierUp(key, steps) {
+    const i = D.SHIP_LADDER.indexOf(key);
+    return D.SHIP_LADDER[clamp(i + steps, 0, D.SHIP_LADDER.length - 1)];
+  }
+  // Notoriety makes foes tougher: more crew + gunnery + gold, and at thresholds
+  // a bigger hull (so there are worthy fights — and bigger prizes to capture).
+  function scaleEnemy(tmpl) {
+    const n = state.run.notoriety || 0;
+    const shipClass = shipTierUp(tmpl.shipClass, Math.floor(n / T.notorShipEvery));
+    return {
+      key: tmpl.key, faction: tmpl.faction, aggression: tmpl.aggression,
+      shipClass,
+      name: (tmpl.faction === "navy" ? "Navy " : "") + D.SHIP_CLASSES[shipClass].name,
+      crew: Math.max(1, Math.round(tmpl.crew * (1 + n * T.notorCrewK))),
+      gunnery: tmpl.gunnery + Math.floor(n / T.notorGunneryEvery),
+      gold: Math.round(tmpl.gold * (1 + n * T.notorGoldK)),
+      supplies: tmpl.supplies,
+    };
+  }
+
+  // Swap to a new hull: fresh (undamaged) ship of `key`, crew trimmed to its cap.
+  function changeShip(key) {
+    state.run.shipClass = key;
+    state.run.areas = freshAreas();
+    const cap = D.SHIP_CLASSES[key].crewCap;
+    while (state.run.crew.length > cap) killCrewMember(state.run.crew[state.run.crew.length - 1]);
+    save();
+  }
+
   function startBattle(node) {
-    const tmpl = D.ENEMIES[node.enemy];
+    const tmpl = scaleEnemy(D.ENEMIES[node.enemy]);
     const player = makeBattleShip(state.run.shipClass, true, state.run.areas, state.run.crew.length, 1 + avgSkill(state.run.crew, "gunnery") * 0.4);
     player.x = T.arenaW * 0.30; player.y = T.arenaH * 0.62; player.heading = -0.5;
     const enemy = makeBattleShip(tmpl.shipClass, false, freshAreas(), tmpl.crew, tmpl.gunnery);
@@ -901,13 +931,18 @@
     applyEnemyRep(tmpl);
     // A win lifts spirits — the bloodthirsty most of all.
     changeMorale((kind === "captured" ? T.moraleCapture : T.moraleWin) + crewTraitSum(state.run, "moraleWinBonus"));
+    // A win spreads your name — which brings tougher hunters (notoriety scaling).
+    state.run.notoriety = clamp(state.run.notoriety + T.notorPerWin + (tmpl.faction === "navy" ? T.notorNavyBonus : 0), 0, 200);
     if (tmpl.faction === "navy") lines.push("Word spreads: the brethren toast you; the Crown does not.");
     for (const bq of checkBountyQuests(tmpl.key)) lines.push.apply(lines, bq.lines);
     state.run.gold += gold; state.run.supplies += supplies;
     // Bail out water once safe; area damage persists until a shipwright.
     b.player.water = 0; state.run.areas = b.player.areas;
+    // Capturing a hull bigger than your own lets you take her as your new ship.
+    let prizeClass = null;
+    if (kind === "captured" && D.SHIP_CLASSES[tmpl.shipClass].tier > D.SHIP_CLASSES[state.run.shipClass].tier) prizeClass = tmpl.shipClass;
     save();
-    b.outcome = { kind, gold, supplies, recruited, title, lines };
+    b.outcome = { kind, gold, supplies, recruited, title, lines, prizeClass };
   }
 
   function finishBattle() {
@@ -1062,7 +1097,7 @@
         text("Gold " + r.gold, 24, H - 54, 17, C.gold, "left", "bold");
         text("Supplies " + r.supplies, 150, H - 54, 16, r.supplies <= 2 ? C.danger : C.text);
         text("Crew " + r.crew.length + "/" + D.SHIP_CLASSES[r.shipClass].crewCap + (wc ? "  (" + wc + " wounded)" : ""), 300, H - 54, 16, wc ? C.gold : C.text);
-        text("Notoriety " + r.notoriety, 540, H - 54, 16, r.notoriety > 50 ? C.danger : C.dim);
+        text("Notoriety " + r.notoriety + (r.notoriety >= T.notorHunted ? " — HUNTED" : ""), 540, H - 54, 16, r.notoriety >= T.notorHunted ? C.danger : r.notoriety > 30 ? C.gold : C.dim);
         text(D.SHIP_CLASSES[r.shipClass].name, W - 24, H - 54, 16, C.dim, "right");
         // Morale line + rum ration.
         text("Morale", 24, H - 24, 15, C.text);
@@ -1383,10 +1418,16 @@
       if (button(W / 2 - 90, 330, 180, 40, "Continue")) finishBattle();
       return;
     }
-    text(o.title, W / 2, 200, 30, C.hi, "center", "bold");
-    let y = 240; for (const l of o.lines) { y = wrap(l, W / 2 - 220, y, 440, 22, 16, C.text, "center") + 26; }
-    text("+" + o.gold + " gold   +" + o.supplies + " supplies", W / 2, y + 4, 18, C.gold, "center", "bold");
-    if (button(W / 2 - 90, 345, 180, 40, "Onward")) finishBattle();
+    text(o.title, W / 2, 195, 30, C.hi, "center", "bold");
+    let y = 230; for (const l of o.lines) { y = wrap(l, W / 2 - 220, y, 440, 22, 16, C.text, "center") + 24; }
+    text("+" + o.gold + " gold   +" + o.supplies + " supplies", W / 2, y + 2, 18, C.gold, "center", "bold");
+    if (o.prizeClass) {
+      // Take the captured hull as your own (you keep the plunder too).
+      if (button(W / 2 - 200, 340, 190, 40, "Take her — " + D.SHIP_CLASSES[o.prizeClass].name, { bg: C.wood, hover: "#855c33", size: 14 })) { changeShip(o.prizeClass); finishBattle(); }
+      if (button(W / 2 + 10, 340, 190, 40, "Keep your ship", {})) finishBattle();
+    } else {
+      if (button(W / 2 - 90, 345, 180, 40, "Onward")) finishBattle();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1411,15 +1452,16 @@
     if (priceMult() !== 1) text((priceMult() < 1 ? "Goodwill: prices down" : "Distrust: prices up"), W - 200, 74, 13, priceMult() < 1 ? C.green : C.danger);
 
     // tabs
-    const tabs = [["yard", "Shipwright"], ["tavern", "Tavern"], ["market", "Market"], ["crew", "Crew"], ["rumors", "Rumours"]];
+    const tabs = [["yard", "Shipwright"], ["drydock", "Drydock"], ["tavern", "Tavern"], ["market", "Market"], ["crew", "Crew"], ["rumors", "Rumours"]];
     let tx = 40;
     for (const [k, label] of tabs) {
-      if (button(tx, 110, 116, 38, label, { bg: P.tab === k ? C.wood : C.panelLt, hover: "#855c33", size: 14 })) P.tab = k;
-      tx += 124;
+      if (button(tx, 110, 100, 38, label, { bg: P.tab === k ? C.wood : C.panelLt, hover: "#855c33", size: 13 })) P.tab = k;
+      tx += 108;
     }
 
     panel(40, 165, W - 80, 330);
     if (P.tab === "yard") renderYard();
+    else if (P.tab === "drydock") renderDrydock();
     else if (P.tab === "tavern") renderTavern();
     else if (P.tab === "market") renderMarket();
     else if (P.tab === "crew") renderCrew();
@@ -1454,6 +1496,32 @@
         if (can) { r.gold -= cost; r.areas = freshAreas(); for (const c of r.crew) gainSkill(c, "repair", T.xpRepairPerPortFix); save(); }
       }
       if (!can) text("Not enough gold for a full repair.", 70, y + 74, 14, C.danger);
+    }
+  }
+
+  const speedWord = (sc) => sc.turnRate >= 1.2 ? "nimble" : sc.turnRate >= 0.8 ? "steady" : "ponderous";
+  function renderDrydock() {
+    const r = state.run, cur = D.SHIP_CLASSES[r.shipClass];
+    text("The Drydock", 70, 200, 20, C.text, "left", "bold");
+    text("Trade your hull up the ladder (your old ship is taken in part-exchange).", 260, 200, 13, C.dim, "left", "italic");
+    let y = 224;
+    for (const key of D.SHIP_LADDER) {
+      const sc = D.SHIP_CLASSES[key], mine = key === r.shipClass;
+      panel(60, y, W - 120, 52, mine ? C.panelLt : C.panel);
+      text((mine ? "▸ " : "") + sc.name, 78, y + 22, 17, mine ? C.hi : C.text, "left", "bold");
+      text("tier " + sc.tier + " · " + sc.gunsPerSide + " guns/side · crew cap " + sc.crewCap + " · " + speedWord(sc), 78, y + 40, 12, C.dim);
+      if (mine) {
+        text("your ship", W - 150, y + 30, 14, C.gold, "left", "italic");
+      } else {
+        const net = Math.max(Math.round(sc.cost * 0.25), Math.round(sc.cost * priceMult()) - Math.round(cur.sellValue * priceMult()));
+        const tooMany = r.crew.length > sc.crewCap;
+        const can = r.gold >= net && !tooMany;
+        if (button(W - 250, y + 10, 190, 32, "Buy — " + net + " gold", { size: 13, disabled: !can, bg: can ? "#2c5a3a" : undefined, hover: "#3f8a4f" })) {
+          if (can) { r.gold -= net; changeShip(key); }
+        }
+        if (tooMany) text("too many crew (cap " + sc.crewCap + ")", W - 250, y + 48, 11, C.danger);
+      }
+      y += 58;
     }
   }
 
@@ -1630,7 +1698,7 @@
   // Debug/testing surface (harmless in play — nothing calls it automatically).
   window.BLACKTIDE = {
     get state() { return state; }, D,
-    api: { sailTo, openEvent, rollEvent, addQuest, buildPort, startBattle, officerMult, officerFactor, meleePower, rankOf },
+    api: { sailTo, openEvent, rollEvent, addQuest, buildPort, startBattle, endBattle, scaleEnemy, changeShip, officerMult, officerFactor, meleePower, rankOf },
   };
   requestAnimationFrame(frame);
 })();

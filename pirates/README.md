@@ -77,6 +77,12 @@ Checks every data record's shape and the core battle-math invariants
   Appoint **officers** (Quartermaster, Boatswain, Master Gunner, Ship's Doctor, Navigator) —
   their strength scales with their **skill** in that craft — and manage everything from the
   port **Crew** tab (promote / arm / dismiss / divide the plunder / tend the wounded).
+- **Bigger ships** — climb the ladder from **sloop → brig → frigate → galleon**: bigger hulls
+  carry more guns and crew but turn like a barn door. Buy up at a port **Drydock** (your old
+  hull is taken in part-exchange), or **capture** an enemy bigger than yours by boarding and
+  **take her as your own**. Difficulty scales with **notoriety** — every win spreads your name,
+  and notorious captains draw bigger, better-crewed hunters (and bigger prizes). Lie low
+  between raids to let the heat cool.
 - **Roguelike economy** — gold, supplies, crew, ship condition; permadeath; reach the
   retire-gold goal at any port to win the run.
 

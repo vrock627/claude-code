@@ -16,7 +16,10 @@ mutiny; promotable officer roles granting ship-wide bonuses; and a port crew-man
 screen). Crew have **no fixed jobs** — competence is purely the skills a hand levels — and
 their character comes from **quirks** (Brawler, Coward, Drunkard, Sawbones, Quick Study,
 Loyal, Greedy, …) wired into combat, at-sea passives, morale/mutiny, and events; officer
-strength scales with the appointee's skill in that craft.
+strength scales with the appointee's skill in that craft. **Bigger ships** are in too: a
+sloop→brig→frigate→galleon ladder you climb by **buying up at a port drydock** (trade-in) or
+**capturing a bigger enemy** and taking her hull — with difficulty scaling off **notoriety**
+(wins draw bigger, tougher hunters and bigger prizes) rather than a player-tier system.
 
 ---
 

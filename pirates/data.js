@@ -24,24 +24,37 @@
     grape: { label: "Grape-shot", key: "grape", base: 5, bias: { deck: 1.7 },  casualty: 0.45, desc: "Shreds crew on deck." },
   };
 
-  // Player-selectable ship classes (slice ships in the sloop/brig range).
+  // Ship classes form a ladder (tier 0..3). `cost` is the drydock buy price,
+  // `sellValue` the trade-in credit (< cost). Bigger = more guns + crew but
+  // slower to turn. The sloop is the free starting hull.
   const SHIP_CLASSES = {
     sloop: {
-      key: "sloop", name: "Sloop", maxSpeed: 132, turnRate: 1.55, gunsPerSide: 3,
+      key: "sloop", name: "Sloop", tier: 0, cost: 0, sellValue: 60,
+      maxSpeed: 132, turnRate: 1.55, gunsPerSide: 3,
       crewCap: 10, crewIdeal: 2, length: 46, beam: 16, gunRange: 270,
       desc: "Fast and nimble, but thin-hulled. A raider's first command.",
     },
     brig: {
-      key: "brig", name: "Brig", maxSpeed: 108, turnRate: 1.15, gunsPerSide: 5,
+      key: "brig", name: "Brig", tier: 1, cost: 220, sellValue: 110,
+      maxSpeed: 108, turnRate: 1.15, gunsPerSide: 5,
       crewCap: 18, crewIdeal: 3, length: 60, beam: 20, gunRange: 300,
       desc: "A balanced all-rounder with a respectable broadside.",
     },
     frigate: {
-      key: "frigate", name: "Frigate", maxSpeed: 92, turnRate: 0.85, gunsPerSide: 8,
+      key: "frigate", name: "Frigate", tier: 2, cost: 560, sellValue: 300,
+      maxSpeed: 92, turnRate: 0.85, gunsPerSide: 8,
       crewCap: 26, crewIdeal: 4, length: 76, beam: 24, gunRange: 330,
       desc: "A heavy warship: slow to turn, brutal to cross.",
     },
+    galleon: {
+      key: "galleon", name: "Galleon", tier: 3, cost: 1200, sellValue: 650,
+      maxSpeed: 74, turnRate: 0.6, gunsPerSide: 12,
+      crewCap: 36, crewIdeal: 5, length: 96, beam: 32, gunRange: 350,
+      desc: "A floating fortress — ponderous to turn, devastating to face.",
+    },
   };
+  // Ship keys ordered by tier (used for enemy class-upgrades and the drydock).
+  const SHIP_LADDER = Object.keys(SHIP_CLASSES).sort((a, b) => SHIP_CLASSES[a].tier - SHIP_CLASSES[b].tier);
 
   // Non-gun battle stations the player distributes hands across (cannons are
   // manned individually — see the cannon model). Effectiveness is driven by
@@ -294,7 +307,7 @@
     recruitCost: 60,            // gold per new hand
     supplyCost: 6,              // gold per supply unit
     weaponStock: ["cutlass", "axe", "pistol"],
-    retireGold: 600,            // reach this, retire at any port → victory
+    retireGold: 1500,           // reach this, retire at any port → victory
   };
 
   // Every balance knob lives here, so tuning never means hunting the engine.
@@ -393,10 +406,19 @@
     greedyMutinyBump: 0.05,    // added mutiny chance per greedy hand once shares run stale
     greedyStaleLegs: 4,        // legs without dividing plunder before greed bites
     scoutHops: 1,             // extra map hops a Sharp-Eyed hand / Navigator reveals
+
+    // --- Notoriety-driven enemy scaling (iteration 5) ---
+    notorCrewK: 0.010,         // enemy crew multiplier per notoriety point
+    notorGunneryEvery: 45,     // +1 enemy gunnery per this much notoriety
+    notorShipEvery: 40,        // enemy ship climbs one tier per this much notoriety
+    notorGoldK: 0.006,         // enemy gold multiplier per notoriety point
+    notorPerWin: 6,            // notoriety gained per victory
+    notorNavyBonus: 4,         // extra notoriety for beating a navy foe
+    notorHunted: 60,           // at/above this you are "hunted" (HUD cue)
   };
 
   window.PIRATEDATA = {
-    AREAS, SHOT_TYPES, SHIP_CLASSES, STATIONS, SKILLS, TRAITS, CAPTAIN_TRAITS,
+    AREAS, SHOT_TYPES, SHIP_CLASSES, SHIP_LADDER, STATIONS, SKILLS, TRAITS, CAPTAIN_TRAITS,
     RANKS, OFFICER_ROLES, WEAPONS, ENEMIES, FACTIONS, EVENTS, QUESTS, PORT_QUESTS,
     FIRST_NAMES, NICKNAMES, PORT, TUNING,
   };
