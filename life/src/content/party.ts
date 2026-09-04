@@ -37,7 +37,10 @@ const kHere = (s: GameState) => s.scene!.vars.kHere === true;
 const spotted = (s: GameState) => kHere(s) && s.scene!.vars.kSpotted === true;
 const kphase = (s: GameState) => Number(s.scene!.vars.kphase ?? 0);
 const topicDone = (s: GameState, t: string) => s.scene!.vars['ktopic_' + t] === true;
-const m = (s: GameState) => s.scene!.date!.meters;
+// Null-safe: a party she isn't at has no date session, and several branches
+// read meters defensively while the scene decides whether she's present.
+const m = (s: GameState) =>
+  s.scene!.date?.meters ?? { interest: 0, comfort: 0, momentum: 0 };
 const dating = (s: GameState) => s.k.hasNumber;
 const shirtless = (s: GameState) =>
   s.scene!.wardrobe.player === 'p-shirtless' || !(s.scene!.garments?.player ?? {}).shirt;
