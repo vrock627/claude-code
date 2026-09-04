@@ -181,6 +181,14 @@ export interface Choice {
   // ids ('player', 'k'), values are outfit ids from content/outfits.ts. The
   // scene's wardrobe stays consistent until something changes it.
   setOutfit?: Record<string, string>;
+  // Remove a tracked garment. Omit `slot` to take the outermost thing left.
+  // 'both' strips one item from each character.
+  removeGarment?: { who: 'player' | 'k' | 'both'; slot?: string };
+  // Replace a character's whole garment set — redressing after a swim, or
+  // reclaiming a shirt won back off a banner pole.
+  setGarments?: Record<string, Record<string, string>>;
+  // Set scene vars from a seeded random draw (0..1) — how dares are dealt.
+  roll?: (s: GameState, r: number) => Record<string, string | number | boolean>;
   // Conditional branch decided at click time by hidden state — e.g. she only
   // says yes to giving her number if the meters earned it.
   judge?: { pass: (s: GameState) => boolean; onPass: string; onFail: string };
@@ -222,6 +230,10 @@ export interface SceneState {
   vars: Record<string, string | number | boolean>; // scene-local dynamic state
   // What everyone is wearing this scene, by character id ('player', 'k').
   wardrobe: Record<string, string>;
+  // Objective per-slot clothing tracker (jacket/shirt/pants/bra/panties/
+  // boxers). Present in scenes that track clothing item by item; the portrait
+  // and all prose read from this rather than from a named outfit.
+  garments?: Record<string, Record<string, string>>;
 }
 
 // ---------------------------------------------------------------------------
