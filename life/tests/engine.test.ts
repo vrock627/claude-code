@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { currentNode, initialState, reducer, visibleChoices } from '../src/engine/reducer';
 import { PARTY_LOCATIONS } from '../src/content/lifeContent';
+import { eligible, rollDare } from '../src/content/dares';
 import {
   effectiveRequirement,
   judgeMove,
@@ -493,11 +494,58 @@ describe('party v2: locations, spice, outfits, truth or dare', () => {
     expect(visibleChoices(mild, currentNode(mild)!).some((c) => c.text.includes('STRIP PONG'))).toBe(false);
   });
 
-  it('losing your shirt to a dare is tracked in the scene wardrobe', () => {
+  it('garments are tracked per slot and come off outermost-first', () => {
     let s = startParty(7, 'frat');
-    s = { ...s, scene: { ...s.scene!, nodeId: 'todDare1Shirt', vars: { ...s.scene!.vars, spice: 3 } } };
-    s = reducer(s, { type: 'CHOOSE', index: 0 });
-    expect(s.scene?.wardrobe.player).toBe('p-shirtless');
+    expect(s.scene?.garments?.player).toEqual({
+      shirt: 'shirt',
+      pants: 'jeans',
+      boxers: 'boxers',
+    });
+    expect(Object.keys(s.scene!.garments!.k)).toEqual(
+      expect.arrayContaining(['jacket', 'shirt', 'pants', 'bra', 'panties'])
+    );
+    // A forfeit takes the outermost item, then the next, in order.
+    const drawStrip = (st: GameState): GameState => {
+      const at = {
+        ...st,
+        scene: { ...st.scene!, nodeId: 'dareDraw', vars: { ...st.scene!.vars, spice: 3, dare: 'strip-self' } },
+      };
+      const idx = visibleChoices(at, currentNode(at)!).findIndex((c) => c.text.startsWith('Take it off'));
+      return reducer(at, { type: 'CHOOSE', index: idx });
+    };
+    s = drawStrip(s);
+    expect(s.scene?.garments?.player).toEqual({ pants: 'jeans', boxers: 'boxers' });
+    s = drawStrip(s);
+    expect(s.scene?.garments?.player).toEqual({ boxers: 'boxers' });
+    s = drawStrip(s);
+    expect(s.scene?.garments?.player).toEqual({});
+  });
+
+  it('dares are drawn at random from a pool gated by heat and inventory', () => {
+    const s = startParty(7, 'frat');
+    const at = (spice: number, heat: number, over: Partial<Record<string, unknown>> = {}) => ({
+      ...s,
+      scene: { ...s.scene!, vars: { ...s.scene!.vars, spice, heat, kSpotted: true, ...over } },
+    });
+    // Tier 1 table: only silly dares are legal.
+    expect(eligible(at(1, 0)).every((d) => d.tier === 1)).toBe(true);
+    // Tier 3 table with a comfortable date: kiss/strip/dance unlock.
+    const hot = at(3, 3);
+    hot.scene.date = {
+      ...hot.scene.date!,
+      meters: { interest: 80, comfort: 80, momentum: 70 },
+    };
+    const kinds = new Set(eligible(hot).map((d) => d.kind));
+    expect(kinds.has('strip')).toBe(true);
+    expect(kinds.has('kiss')).toBe(true);
+    expect(kinds.has('dance')).toBe(true);
+    // Rolling is seeded and produces varied ids across the pool.
+    const ids = new Set(Array.from({ length: 20 }, (_, i) => rollDare(hot, i / 20)));
+    expect(ids.size).toBeGreaterThan(2);
+    // Already-drawn dares don't come back.
+    const drawn = { ...hot, scene: { ...hot.scene, vars: { ...hot.scene.vars, drawn: 'strip-self,kiss-lips' } } };
+    expect(eligible(drawn).map((d) => d.id)).not.toContain('strip-self');
+    expect(eligible(drawn).map((d) => d.id)).not.toContain('kiss-lips');
   });
 
   it('all four locations play through to the end', () => {

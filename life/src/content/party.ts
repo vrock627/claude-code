@@ -16,6 +16,8 @@
 
 import type { GameState, Scene, SceneNode } from '../engine/types';
 import { CALLBACK_LINES, MEMORY_FACTS } from './krystalle';
+import { DARE_BY_ID, bothBare, heatTier, rollDare } from './dares';
+import { count, describe, isBare, isStripped, outermost, type Garments } from './garments';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -37,7 +39,22 @@ const kphase = (s: GameState) => Number(s.scene!.vars.kphase ?? 0);
 const topicDone = (s: GameState, t: string) => s.scene!.vars['ktopic_' + t] === true;
 const m = (s: GameState) => s.scene!.date!.meters;
 const dating = (s: GameState) => s.k.hasNumber;
-const shirtless = (s: GameState) => s.scene!.wardrobe.player === 'p-shirtless';
+const shirtless = (s: GameState) =>
+  s.scene!.wardrobe.player === 'p-shirtless' || !(s.scene!.garments?.player ?? {}).shirt;
+
+// --- garment + dare helpers ---
+const worn = (s: GameState, who: 'player' | 'k'): Garments =>
+  (s.scene!.garments?.[who] ?? {}) as Garments;
+const dare = (s: GameState) => DARE_BY_ID[String(s.scene!.vars.dare ?? '')];
+const dareKind = (s: GameState) => dare(s)?.kind ?? 'silly';
+const dareId = (s: GameState) => dare(s)?.id ?? '';
+const dareTarget = (s: GameState) => dare(s)?.target ?? 'player';
+// Track drawn dares so the deck never repeats itself in one night.
+const markDrawn = (s: GameState, r: number) => {
+  const id = rollDare(s, r);
+  const drawn = String(s.scene!.vars.drawn ?? '').split(',').filter(Boolean);
+  return { dare: id, drawn: [...drawn, id].join(',') };
+};
 
 const NUMBER_JUDGE = (s: GameState) =>
   m(s).interest >= 52 && m(s).comfort >= 48 && m(s).momentum >= 30;
@@ -535,6 +552,7 @@ const NODES: Record<string, SceneNode> = {
       {
         text: 'Own it. Shirtless is a lifestyle now.',
         setOutfit: { player: 'p-shirtless' },
+        removeGarment: { who: 'player', slot: 'shirt' },
         judge: {
           pass: (s) => s.stats.fitness >= 5,
           onPass: 'stripOwnGood',
@@ -544,6 +562,7 @@ const NODES: Record<string, SceneNode> = {
       {
         text: 'Demand the rematch. Double or nothing — winner takes the pole.',
         setOutfit: { player: 'p-shirtless' },
+        removeGarment: { who: 'player', slot: 'shirt' },
         check: {
           stat: 'fitness',
           label: 'Double or nothing',
@@ -568,6 +587,7 @@ const NODES: Record<string, SceneNode> = {
       {
         text: 'Retire forever at the summit.',
         setOutfit: { player: '$default' },
+        setGarments: { player: { shirt: 'shirt', pants: 'jeans', boxers: 'boxers' } },
         goto: 'flow',
       },
     ],
@@ -583,6 +603,7 @@ const NODES: Record<string, SceneNode> = {
       {
         text: 'Take a bow. Wear the towel-cape like it was the plan all along.',
         setOutfit: { player: 'p-boxers' },
+        removeGarment: { who: 'player', slot: 'pants' },
         judge: {
           pass: (s) => !spotted(s) || m(s).interest >= 55,
           onPass: 'stripBottomK',
@@ -1208,6 +1229,7 @@ const NODES: Record<string, SceneNode> = {
           loseEffects: { mood: 6, momentum: 6 },
         },
         setOutfit: { player: 'p-towel' },
+        setGarments: { player: {} },
       },
       {
         text: 'Catch her eye across the countdown. This one’s a two-person decision.',
@@ -1217,6 +1239,7 @@ const NODES: Record<string, SceneNode> = {
           onPass: 'dipTogether',
           onFail: 'dipDecline',
         },
+        setGarments: { player: {}, k: {} },
       },
       {
         text: '“C’mon, everyone’s going in—” Press her toward the water.',
@@ -1675,7 +1698,13 @@ const NODES: Record<string, SceneNode> = {
       (spotted(s) ? ' Krystalle mouths it with him: truth or dare.' : ''),
     choices: [
       { text: 'Truth.', goto: 'todTruth1' },
-      { text: 'Dare.', goto: 'todDare1' },
+      {
+        text: 'Dare. Let the deck decide.',
+        roll: (s, r) => markDrawn(s, r),
+        setVars: { dareReturn: 'todR2' },
+        addVars: { draws: 1 },
+        goto: 'dareDraw',
+      },
     ],
   },
 
@@ -1747,107 +1776,6 @@ const NODES: Record<string, SceneNode> = {
     nextLabel: 'The bottle spins on',
   },
 
-  // ---- round 1: dare ----
-  todDare1: {
-    id: 'todDare1',
-    text: (s) => {
-      if (sp(s) === 1)
-        return 'The shoebox produces: \u201cDo the rest of this round in a dramatic movie-trailer voice.\u201d The circle is already delighted.';
-      if (sp(s) === 2) {
-        const d: Record<string, string> = {
-          pool: 'The shoebox produces: \u201cBackflip off the diving board, or belly-flop trying.\u201d The circle is already standing.',
-          frat: 'The shoebox produces: \u201cSerenade the keg. A full verse. It has feelings.\u201d',
-          rooftop: 'The shoebox produces: \u201cDeclare your love to the skyline. Loudly. It\u2019s a good listener.\u201d',
-          house: 'The shoebox produces: \u201cLet the circle redo your hairstyle. No mirror until morning.\u201d',
-        };
-        return d[L(s)];
-      }
-      const d3: Record<string, string> = {
-        pool: 'The shoebox produces, to whoops: \u201cShirt in the pool. It stays there till the game ends.\u201d' ,
-        frat: 'The shoebox produces, to a chant already forming: \u201cShirt on the banner pole. Contribute to the flag.\u201d',
-        rooftop: 'The shoebox produces: \u201cSwap shirts with the person to your left for the rest of the night.\u201d The person to your left is a man named Gus, built like a different species.',
-        house: 'The shoebox produces: \u201cShirt goes on the lamp. The lamp has earned it.\u201d',
-      };
-      return d3[L(s)];
-    },
-    choices: [
-      {
-        text: 'Do the dare. Fully. This is not a house of half measures.',
-        judge: { pass: (s) => sp(s) >= 3, onPass: 'todDare1Shirt', onFail: 'todDare1Do' },
-      },
-      {
-        text: 'Negotiate it down with charm \u2014 counteroffer something funnier.',
-        check: {
-          stat: 'charm',
-          label: 'The counteroffer',
-          dc: 13,
-          onWin: 'todDare1Counter',
-          onLose: 'todDare1Chicken',
-          winEffects: { momentum: 8, interest: 5 },
-          winFlags: ['funny'],
-          loseEffects: { momentum: -6, interest: -3 },
-          loseFlags: ['boring'],
-        },
-      },
-    ],
-  },
-  todDare1Do: {
-    id: 'todDare1Do',
-    text: (s) => {
-      if (sp(s) === 1)
-        return 'IN A WORLD, you begin, WHERE ONE MAN SITS IN A CIRCLE \u2014 and the round proceeds entirely in trailer voice, which improves everything, especially the chairman\u2019s rulings.';
-      const d: Record<string, string> = {
-        pool: 'The backflip is \u2014 charitably \u2014 a flip. The impact is heard at street level. You surface to a 10, an 8, and one card that just says OW. Worth it.',
-        frat: 'You serenade the keg with real feeling. The keg says nothing, which in this house counts as being moved. Three brothers join the final chorus on their knees.',
-        rooftop: 'You declare your love to the skyline at full volume. A window lights up two buildings over. It flickers \u2014 twice. The skyline loves you back.',
-        house: 'The circle descends on your hair with clips and theories. You emerge as \u201ca Renaissance prince, if he lost a bet.\u201d You wear it with dignity. It wears you back.',
-      };
-      return d[L(s)];
-    },
-    next: 'todR2',
-    nextLabel: 'The circle approves',
-  },
-  todDare1Shirt: {
-    id: 'todDare1Shirt',
-    text: (s) =>
-      spotted(s)
-        ? 'The shirt comes off to a stadium reaction and goes where the dare demands. Cold? Yes. A retreat? Never. Krystalle applauds exactly three times, slow, then pointedly fans herself with a coaster in a way that is 60% bit.'
-        : 'The shirt comes off to a stadium reaction and goes where the dare demands. Strangers salute. Somewhere, a kazoo.',
-    choices: [
-      {
-        text: 'Carry it like a man who planned this.',
-        setOutfit: { player: 'p-shirtless' },
-        judge: { pass: (s) => s.stats.fitness >= 5, onPass: 'todShirtGood', onFail: 'todShirtMeh' },
-      },
-    ],
-  },
-  todShirtGood: {
-    id: 'todShirtGood',
-    text: (s) =>
-      spotted(s)
-        ? 'The gym hours report for duty. The circle\u2019s heckling dies into a brief, honest \u201coh.\u201d Krystalle\u2019s coaster-fanning drops to 40% bit.'
-        : 'The gym hours report for duty. The circle\u2019s heckling dies into a brief, honest \u201coh.\u201d Two recruitment offers follow (beach volleyball, moving a couch).',
-    next: 'todR2',
-    nextLabel: 'Play on, shirtless',
-  },
-  todShirtMeh: {
-    id: 'todShirtMeh',
-    text: 'You carry it with jokes, which is its own kind of shape. The circle respects commitment over contour. The night is warm enough. Mostly.',
-    next: 'todR2',
-    nextLabel: 'Play on, breezy',
-  },
-  todDare1Counter: {
-    id: 'todDare1Counter',
-    text: 'Your counteroffer \u2014 objectively funnier, technically legal \u2014 passes the circle\u2019s vote by acclaim. You perform it. It becomes the reference dare for the rest of the game: \u201cokay but is it counteroffer good?\u201d',
-    next: 'todR2',
-    nextLabel: 'Precedent set',
-  },
-  todDare1Chicken: {
-    id: 'todDare1Chicken',
-    text: 'The counteroffer dies in committee. The circle smells retreat and invokes the coward\u2019s clause: you hold the shoebox for a round, which is somehow worse than any dare.',
-    next: 'todR2',
-    nextLabel: 'Hold the box of shame',
-  },
 
   // ---- round 2: the circle turns on her (or on the chaos) ----
   todR2: {
@@ -2051,18 +1979,11 @@ const NODES: Record<string, SceneNode> = {
     kLine: (s) => (spotted(s) ? '“Two layers banked. I came prepared. Did you?”' : ''),
     choices: [
       {
-        text: 'Take the first overtime dare, whatever it is. Sight unseen.',
-        check: {
-          stat: 'charm',
-          label: 'Blind dare',
-          dc: 13,
-          onWin: 'todOT1Win',
-          onLose: 'todOT1Lose',
-          winEffects: { interest: 8, momentum: 12, mood: 5 },
-          winFlags: ['confident'],
-          loseEffects: { momentum: -3 },
-        },
-        addVars: { spice: 1, heat: 1 },
+        text: 'Draw. Whatever the deck says, sight unseen.',
+        roll: (s, r) => markDrawn(s, r),
+        setVars: { dareReturn: 'todOT2' },
+        addVars: { draws: 1, spice: 1, heat: 1 },
+        goto: 'dareDraw',
       },
       {
         text: 'Amend the amendment: “Whoever assigns a dare has to do it too.”',
@@ -2082,44 +2003,6 @@ const NODES: Record<string, SceneNode> = {
         text: 'Bow out while fully dressed. Dignity is a finite resource.',
         effects: { momentum: -4 },
         goto: 'todOTBow',
-      },
-    ],
-  },
-  todOT1Win: {
-    id: 'todOT1Win',
-    text: (s) => {
-      const d: Record<string, string> = {
-        pool: 'The blind dare: “Deliver a heartfelt eulogy for the inflatable flamingo. It has passed. It passed forty minutes ago and nobody said anything.” You deliver twelve minutes of eulogy. Two people actually cry. The flamingo is committed to the deep end.',
-        frat: 'The blind dare: “Sit in the recruitment chair and answer three questions as if you are rushing.” You commit so completely that Tanner offers you a legacy bid and someone starts a chant with your name in it.',
-        rooftop: 'The blind dare: “Narrate the street below for two minutes as a nature documentary.” You do it in the voice, and the rooftop goes dead silent to listen. “The male, having circled twice, approaches the taco cart. He has no plan.”',
-        house: 'The blind dare: “Take a phone call from the next person who calls anyone here, as that person.” You field a wrong-number telemarketer as a grieving Victorian widow. The circle is destroyed.',
-      };
-      return (
-        d[L(s)] +
-        (spotted(s)
-          ? ' Krystalle has both hands flat on the floor, laughing so hard she is silent, which is somehow the loudest reaction in the room.'
-          : '')
-      );
-    },
-    kLine: (s) => (spotted(s) ? '“Sight unseen! He took it SIGHT UNSEEN!” she wheezes to nobody. “I need a minute.”' : ''),
-    mood: 'laughing',
-    next: 'todOT2',
-    nextLabel: 'The circle wants more',
-  },
-  todOT1Lose: {
-    id: 'todOT1Lose',
-    text: (s) =>
-      spotted(s)
-        ? 'The blind dare turns out to be “swap an item of clothing with the chairman, permanently.” The chairman is wearing a mesh tank top and no shame. You surrender your shirt to the office and receive the mesh. It fits like a rumor. Krystalle bites down on her cup to keep from making a sound and fails completely.'
-        : 'The blind dare turns out to be “swap an item of clothing with the chairman, permanently.” You surrender your shirt and receive a mesh tank top that fits like a rumor. The circle salutes the transaction.',
-    kLine: (s) => (spotted(s) ? '“It’s— no, it’s working. It’s a LOOK. I hate that it’s a look.”' : ''),
-    choices: [
-      {
-        text: 'Wear the mesh. Wear it like it was tailored.',
-        setOutfit: { player: 'p-mesh' },
-        effects: { momentum: 6, interest: 4 },
-        flags: ['funny'],
-        goto: 'todOT2',
       },
     ],
   },
@@ -2318,6 +2201,7 @@ const NODES: Record<string, SceneNode> = {
         text: 'Over the edge with them. Everything on the deck, like the card says.',
         cond: (s) => sp(s) >= 3 && L(s) === 'pool',
         setOutfit: { player: 'p-towel' },
+        setGarments: { player: {} },
         effects: { interest: 8, momentum: 12, mood: 6 },
         flags: ['confident', 'sexy'],
         addVars: { spice: 1, heat: 1 },
@@ -2327,6 +2211,7 @@ const NODES: Record<string, SceneNode> = {
         text: 'Beat the timer. Denim is a liability and breakfast for eleven is real money.',
         cond: (s) => sp(s) >= 3 && L(s) === 'frat',
         setOutfit: { player: 'p-boxers' },
+        setGarments: { player: { boxers: 'boxers' } },
         effects: { interest: 8, momentum: 12, mood: 6 },
         flags: ['confident', 'funny'],
         addVars: { spice: 1, heat: 1 },
@@ -2336,6 +2221,7 @@ const NODES: Record<string, SceneNode> = {
         text: 'Shirt on the lamp, truth on the table. Both at once, like the card says.',
         cond: (s) => sp(s) >= 3 && L(s) === 'house',
         setOutfit: { player: 'p-shirtless' },
+        removeGarment: { who: 'player', slot: 'shirt' },
         effects: { interest: 8, momentum: 12, mood: 6 },
         flags: ['confident', 'nice'],
         addVars: { spice: 1, heat: 1 },
@@ -2459,6 +2345,419 @@ const NODES: Record<string, SceneNode> = {
         text: 'Back into the night, fully clothed.',
         setVars: { done_tod: true },
         addVars: { beats: 1 },
+        goto: 'flow',
+      },
+    ],
+  },
+
+  // ======================================================== THE DARE DECK
+  // Dares are drawn at random from a pool filtered by the table's heat, who is
+  // present, and what everyone still has on (see content/dares.ts). Nothing
+  // here is scripted: the same seat produces a different night every time.
+  dareDraw: {
+    id: 'dareDraw',
+    text: (s) => {
+      const d = dare(s);
+      const head =
+        heatTier(s) >= 3
+          ? 'The deck has stopped being polite. '
+          : heatTier(s) === 2
+            ? 'The circle leans in. '
+            : '';
+      return head + (d ? d.prompt(s) : 'the chairman draws a blank card, stares at it, and reshuffles.');
+    },
+    kLine: (s) =>
+      spotted(s) && dareTarget(s) !== 'player'
+        ? dareKind(s) === 'strip'
+          ? '“Reading it out loud doesn’t make it binding, chairman.” She’s already reaching for the hem, though.'
+          : dareKind(s) === 'kiss'
+            ? '“The DECK said it. I want that in the minutes. I am a woman of the law.”'
+            : '“Oh, absolutely not.” A beat. “Okay, yes. But under protest.”'
+        : '',
+    choices: [
+      // --- silly ---
+      {
+        text: 'Do it. Fully committed, no irony.',
+        cond: (s) => dareKind(s) === 'silly',
+        effects: { interest: 6, momentum: 10, mood: 5 },
+        flags: ['funny'],
+        goto: 'dareSilly',
+      },
+      // --- strip: you ---
+      {
+        text: 'Take it off. The deck is the deck.',
+        cond: (s) => dareKind(s) === 'strip' && dareTarget(s) === 'player',
+        removeGarment: { who: 'player' },
+        effects: { momentum: 8 },
+        flags: ['confident'],
+        addVars: { heat: 1 },
+        goto: 'dareStripSelf',
+      },
+      // --- strip: her (she decides) ---
+      {
+        text: 'Hand the card to her and let her answer it herself.',
+        cond: (s) => dareKind(s) === 'strip' && dareTarget(s) === 'k',
+        judge: {
+          pass: (s) => m(s).comfort >= 55 && m(s).interest >= 45,
+          onPass: 'dareStripK',
+          onFail: 'dareKDeclines',
+        },
+        addVars: { heat: 1 },
+      },
+      {
+        text: '“Deck’s wrong. Redraw.” Kill it before she has to answer it.',
+        cond: (s) => dareKind(s) === 'strip' && dareTarget(s) === 'k',
+        effects: { comfort: 10, interest: 4 },
+        flags: ['gentleman'],
+        goto: 'dareVeto',
+      },
+      // --- strip: matched pair ---
+      {
+        text: 'Matched pair, then. On the circle’s count.',
+        cond: (s) => dareKind(s) === 'strip' && dareTarget(s) === 'both',
+        judge: {
+          pass: (s) => m(s).comfort >= 60,
+          onPass: 'dareStripBoth',
+          onFail: 'dareKDeclines',
+        },
+        addVars: { heat: 1 },
+      },
+      // --- kiss ---
+      {
+        text: 'Pick her. Obviously you pick her.',
+        cond: (s) => dareId(s) === 'kiss-cheek',
+        effects: { interest: 6, comfort: 4, momentum: 8 },
+        addVars: { heat: 1 },
+        goto: 'dareKissCheek',
+      },
+      {
+        text: 'Look at her first. Ask with your face. Then answer the card.',
+        cond: (s) => dareId(s) === 'kiss-lips' || dareId(s) === 'kiss-long',
+        move: 'kiss',
+        moveWin: 'dareKissLips',
+        moveLose: 'dareKissNo',
+        addVars: { heat: 1 },
+      },
+      {
+        text: 'Kiss the chairman instead. He said “someone in this circle.”',
+        cond: (s) => dareKind(s) === 'kiss',
+        effects: { momentum: 12, interest: 5 },
+        flags: ['funny'],
+        goto: 'dareKissChairman',
+      },
+      // --- dance ---
+      {
+        text: 'Thirty seconds. Give them everything you have, which is not much.',
+        cond: (s) => dareId(s) === 'dance-solo',
+        check: {
+          stat: 'fitness',
+          label: 'Thirty seconds of dancing',
+          dc: 12,
+          onWin: 'dareDanceWin',
+          onLose: 'dareDanceMeh',
+          winEffects: { interest: 7, momentum: 12, mood: 5 },
+          winFlags: ['confident'],
+          loseEffects: { momentum: 3, mood: 3 },
+        },
+      },
+      {
+        text: 'Take the chair. Let her decide what the song is worth.',
+        cond: (s) => dareId(s) === 'dance-lap',
+        judge: {
+          pass: (s) => m(s).comfort >= 65 && m(s).interest >= 60,
+          onPass: 'dareLap',
+          onFail: 'dareKDeclines',
+        },
+        addVars: { heat: 2 },
+      },
+      // --- universal refusal ---
+      {
+        text: 'Refuse. Overtime rules: a refusal costs a layer.',
+        cond: (s) => count(worn(s, 'player')) > 0,
+        removeGarment: { who: 'player' },
+        effects: { momentum: -4 },
+        goto: 'dareRefuse',
+      },
+      {
+        text: 'Refuse — and you have nothing left to forfeit.',
+        cond: (s) => count(worn(s, 'player')) === 0,
+        effects: { momentum: -6 },
+        goto: 'dareRefuseBroke',
+      },
+    ],
+  },
+
+  dareSilly: {
+    id: 'dareSilly',
+    text: (s) => {
+      const byId: Record<string, string> = {
+        trailer:
+          'IN A WORLD, you begin, and the rest of the round happens in trailer voice, which improves the chairman’s rulings immeasurably.',
+        eulogy:
+          'You give twelve minutes of eulogy for a thing nobody was mourning. Two people actually cry. The deceased is honored appropriately.',
+        serenade:
+          'You serenade it with real feeling. It says nothing back, which in this crowd counts as being moved. Three people join the final chorus on their knees.',
+        documentary:
+          'You narrate the room in the voice, and everyone goes silent to listen. “The male, having circled twice, approaches the snack table. He has no plan.”',
+        impression:
+          'Your impression is guessed in four seconds because you led with the one gesture they do constantly. They are not flattered. Everyone else is delighted.',
+        kimpression:
+          'She does you. She does you with terrifying accuracy — the way you check the room before you answer, the thing you do with your jaw. The circle screams. You have never felt so precisely seen or so publicly dismantled.',
+      };
+      return byId[dareId(s)] ?? 'You do the thing. The circle approves in the way circles do.';
+    },
+    kLine: (s) =>
+      dareId(s) === 'kimpression'
+        ? '“That’s him! That’s the FACE!” She’s crying with laughter. “I’ve been studying you, obviously.”'
+        : spotted(s)
+          ? '“Committed. I hate how committed that was.”'
+          : '',
+    mood: 'laughing',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareStripSelf: {
+    id: 'dareStripSelf',
+    text: (s) => {
+      const left = count(worn(s, 'player'));
+      const base =
+        left === 0
+          ? 'It goes. That was the last of it, and the circle makes a sound it will be embarrassed about tomorrow. You are, objectively and completely, out of clothing.'
+          : isStripped(worn(s, 'player'))
+            ? 'It goes onto the pile without ceremony. You are down to the last layer, and the circle has begun keeping score out loud.'
+            : 'It goes onto the growing pile in the middle of the circle. The chairman notes the forfeit in the record, which is a napkin.';
+      return (
+        base +
+        (spotted(s)
+          ? left === 0
+            ? ' Krystalle has stopped heckling entirely, which is somehow much louder than the heckling.'
+            : ' Krystalle contributes a slow clap of exactly three claps, her specialty.'
+          : '')
+      );
+    },
+    kLine: (s) =>
+      spotted(s) && isBare(worn(s, 'player'))
+        ? '“Okay,” she says, to nobody, fanning herself with a coaster in a way that is no longer 60% bit.'
+        : '',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareStripK: {
+    id: 'dareStripK',
+    text: (s) => {
+      const left = count(worn(s, 'k'));
+      return (
+        'She reads the card twice, says “fine, but I’m doing it with dignity,” and does exactly that — unhurried, entirely on her own terms, eye contact with the chairman the whole time like a dare returned to sender. It joins the pile.' +
+        (left === 0
+          ? ' That was the last of it. The circle, for one full second, forgets to make noise.'
+          : isStripped(worn(s, 'k'))
+            ? ' She is down to the last layer and appears to be enjoying the circle’s discomfort more than her own.'
+            : '')
+      );
+    },
+    kLine: (s) =>
+      isBare(worn(s, 'k'))
+        ? '“Everybody breathe,” she instructs the circle, serene, in charge, and utterly unbothered. “Chairman, you look unwell.”'
+        : '“Deck said it, I did it, we move on. Next card.”',
+    mood: 'flushed',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareStripBoth: {
+    id: 'dareStripBoth',
+    text: (s) =>
+      'The circle counts it down and you both go on “one,” which turns the whole thing from a spectacle into a joint operation — the kind of stupid solidarity that only exists at 1 a.m. Two items hit the pile at the same time. She looks over at you and starts laughing before either of you can be self-conscious about it.' +
+      (bothBare(s)
+        ? ' And that is the end of the inventory. For both of you. The circle has gone from cheering to something quieter and much more interested.'
+        : ''),
+    kLine: '“Solidarity,” she says, holding out a fist. You bump it. The circle finds this more scandalous than the actual dare.',
+    mood: 'flushed',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareKissCheek: {
+    id: 'dareKissCheek',
+    text: 'You cross the circle, and she turns her cheek at the last second with theatrical propriety — a chaste, deliberate, entirely public kiss on the cheek that the circle boos ferociously and she awards full marks for. Her hand stays on your forearm about two seconds longer than the dare called for.',
+    kLine: '“Gentlemanly,” she announces to the boo-ers. “Some of us have RANGE.” Then, quieter, only to you: “Deck’s not done, though.”',
+    mood: 'warm',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareKissLips: {
+    id: 'dareKissLips',
+    text: (s) =>
+      dareId(s) === 'kiss-long'
+        ? 'The circle counts it out loud, and neither of you hears past about three. She comes across the circle rather than waiting for you to arrive, one hand at your jaw, and the ten seconds turn out to be a unit of measurement that means nothing in here. When you separate, the count has stopped, because the counters have forgotten.'
+        : 'You ask with your face; she answers by closing the distance herself. It is short, unhurried and completely unbothered by the audience — and the audience, which came for a spectacle, gets something better and doesn’t know what to do with it.',
+    kLine: (s) =>
+      dareId(s) === 'kiss-long'
+        ? '“Ten seconds,” she says, unsteadily, to the chairman. “You people have no idea how to count.”'
+        : '“Dare fulfilled,” she tells the circle, sitting back like a senator returning from a vote. To you, only mouthed: “Later.”',
+    mood: 'flushed',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareKissNo: {
+    id: 'dareKissNo',
+    text: 'You ask with your face, and she answers it kindly and in full view — a hand to your jaw, a kiss pressed to her own two fingers and transferred to your cheek. Theatrical enough for the circle, unmistakable enough for you.',
+    kLine: '“Rain check,” she announces. “Witnessed and notarized.” The circle, robbed, applauds anyway.',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareKissChairman: {
+    id: 'dareKissChairman',
+    text: (s) =>
+      'You kiss the chairman on the top of his head. He does not break character. He rules it “legal, cowardly, and devastating,” and the circle never recovers.' +
+      (spotted(s) ? ' Krystalle has slid entirely off the couch.' : ''),
+    kLine: (s) => (spotted(s) ? '“HE FOUND A LOOPHOLE.” From the floor. “I’m fine. I’m not fine.”' : ''),
+    mood: 'laughing',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareDanceWin: {
+    id: 'dareDanceWin',
+    text: (s) =>
+      'The circle queues something genuinely cruel and you meet it anyway — thirty seconds of full, shameless commitment. A stranger high-fives you mid-dare for no articulable reason.' +
+      (spotted(s) ? ' Krystalle films exactly four seconds of it, then puts the phone down and just watches.' : ''),
+    kLine: (s) => (spotted(s) ? '“I’m keeping those four seconds forever. That’s my property now.”' : ''),
+    mood: 'laughing',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareDanceMeh: {
+    id: 'dareDanceMeh',
+    text: 'You dance like a man assembling furniture. The circle respects the commitment more than the execution, which is the correct read.',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareLap: {
+    id: 'dareLap',
+    text: (s) =>
+      'The circle picks the song — something slow and filthy and thirty years old — and she takes one look at the chair, one look at you, and decides, visibly, that if this is happening it is happening on her terms. She is unhurried about it. She is very good at it, in the way of someone who has decided to be, and she never once stops looking amused, which is somehow the most disarming part. The circle starts loud and gets progressively, uncomfortably quiet.' +
+      (isBare(worn(s, 'k')) || isStripped(worn(s, 'k'))
+        ? ' Given the state of the pile in the middle of the circle, there is not much left between the performance and the plain fact of it.'
+        : ''),
+    kLine: '“Eyes up, superstar,” she says, at some point, close to your ear, entirely in control. “The song’s almost over and I want to see your face when it is.”',
+    mood: 'flushed',
+    next: 'dareDone',
+    nextLabel: 'The song ends',
+  },
+
+  dareKDeclines: {
+    id: 'dareKDeclines',
+    text: (s) =>
+      'She reads the card, weighs it honestly for a second — you can see her actually consider it — and hands it back to the chairman with a headshake that has no apology in it at all. The circle groans; she absorbs the groan like weather.',
+    kLine: '“Not this one. I’m allowed a veto, it’s in the bylaws, I wrote the bylaws.”',
+    next: 'dareDone',
+    nextLabel: 'The deck moves on',
+  },
+
+  dareVeto: {
+    id: 'dareVeto',
+    text: 'You kill the card before it can land on her — no speech, no spotlight, just “deck’s wrong, redraw,” said fast enough that the circle is already reshuffling before it can object. She doesn’t thank you for it out loud. She moves to sit next to you instead of across from you, which is louder.',
+    kLine: '“Redraw,” she agrees, arriving at your shoulder. “The deck’s been drunk since round one.”',
+    mood: 'warm',
+    next: 'dareDone',
+    nextLabel: 'The deck moves on',
+  },
+
+  dareRefuse: {
+    id: 'dareRefuse',
+    text: (s) =>
+      'You pass. The chairman does not argue — he simply extends a hand toward the pile, and the forfeit is paid in the currency the table has agreed on.' +
+      (isBare(worn(s, 'player'))
+        ? ' That was the last of it. You have refused your way to having nothing left to refuse with, which the circle finds philosophically hilarious.'
+        : ''),
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  dareRefuseBroke: {
+    id: 'dareRefuseBroke',
+    text: 'You pass, and there is nothing left to forfeit. The chairman rules that you are now “playing on credit,” which he cannot define and will not explain. The circle accepts it instantly.',
+    next: 'dareDone',
+    nextLabel: 'Aftermath',
+  },
+
+  // The router: report the objective state of the table, then either draw
+  // again (the game escalating on its own momentum) or rejoin the round.
+  dareDone: {
+    id: 'dareDone',
+    text: (s) => {
+      const you = describe(worn(s, 'player'));
+      const her = spotted(s) ? ` Krystalle: ${describe(worn(s, 'k'))}.` : '';
+      const pile =
+        heatTier(s) >= 3
+          ? 'The pile in the middle of the circle has become the evening’s main landmark. '
+          : '';
+      return `${pile}Inventory, per the chairman’s napkin — you: ${you}.${her}`;
+    },
+    choices: [
+      {
+        text: 'The two of you have run out of inventory. Get out of this circle.',
+        cond: (s) => bothBare(s),
+        goto: 'dareLeave',
+      },
+      {
+        text: 'Draw again. The deck is hot and the circle is not tired.',
+        cond: (s) =>
+          !bothBare(s) && heatTier(s) >= 2 && Number(s.scene!.vars.draws ?? 0) < 6,
+        roll: (s, r) => markDrawn(s, r),
+        addVars: { heat: 1, draws: 1 },
+        goto: 'dareDraw',
+      },
+      {
+        text: 'Let the bottle spin on.',
+        cond: (s) => String(s.scene!.vars.dareReturn ?? 'todR2') === 'todR2',
+        goto: 'todR2',
+      },
+      {
+        text: 'Let the bottle spin on.',
+        cond: (s) => String(s.scene!.vars.dareReturn ?? '') === 'todOT2',
+        goto: 'todOT2',
+      },
+    ],
+  },
+
+  // Both out of clothes: the circle is no longer the right venue for this,
+  // and she is the one who says so.
+  dareLeave: {
+    id: 'dareLeave',
+    text: (s) =>
+      'She stands up before you do. She collects — with total composure, from the pile, in front of everyone — her things and yours, hands you yours, and says the next part to the chairman rather than to you, because saying it to you in front of eleven people would be a gift the circle has not earned.',
+    kLine:
+      '“Chairman. The deck has exhausted its jurisdiction.” She hooks two fingers in the waistband of the jeans she just handed you and tugs, once, toward the hallway. “We’re adjourning. Separately from all of you.”',
+    mood: 'flushed',
+    choices: [
+      {
+        text: 'Go with her.',
+        setVars: { done_tod: true, kLeftWith: true },
+        effects: { interest: 10, comfort: 6, momentum: 10 },
+        flags: ['sexy', 'confident'],
+        addVars: { beats: 1 },
+        goto: 'dareLeaveOut',
+      },
+    ],
+  },
+
+  dareLeaveOut: {
+    id: 'dareLeaveOut',
+    text: 'The hallway is dark and about nine degrees cooler and completely, blessedly empty. She gets one arm into her jacket, gives up on the other, and backs you into the wall beside a coat rack that has seen things. Behind you the circle is still hollering about jurisdiction. Neither of you is listening to it anymore, and the rest of the night stops being the party’s business.',
+    kLine: '“Door,” she says, against your mouth, with the specificity of a woman who has already picked which one.',
+    mood: 'flushed',
+    choices: [
+      {
+        text: 'Find the door.',
         goto: 'flow',
       },
     ],

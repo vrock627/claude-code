@@ -32,6 +32,7 @@ import {
   WARDROBE_TIERS,
 } from '../content/lifeContent';
 import { playerDefaultOutfit } from '../content/outfits';
+import { outermost, partyGarments, type Slot } from '../content/garments';
 import { isDebug } from './debug';
 import { SCENES } from '../content/scenes';
 
@@ -408,6 +409,35 @@ function chooseInScene(s: GameState, index: number): GameState {
     for (const f of choice.unflags) delete flags[f];
     out = { ...out, k: { ...out.k, flags } };
   }
+  if (choice.roll) {
+    const r = nextRand(out.seed);
+    out = { ...out, seed: r.seed };
+    const rolled = choice.roll(out, r.value);
+    out = { ...out, scene: { ...out.scene!, vars: { ...out.scene!.vars, ...rolled } } };
+  }
+  if (choice.removeGarment) {
+    const { who, slot } = choice.removeGarment;
+    const targets = who === 'both' ? ['player', 'k'] : [who];
+    const garments = { ...(out.scene!.garments ?? {}) };
+    for (const t of targets) {
+      const worn = { ...(garments[t] ?? {}) };
+      const take = (slot as Slot | undefined) ?? outermost(worn);
+      if (take && worn[take]) {
+        delete worn[take];
+        garments[t] = worn;
+      }
+    }
+    out = { ...out, scene: { ...out.scene!, garments } };
+  }
+  if (choice.setGarments) {
+    out = {
+      ...out,
+      scene: {
+        ...out.scene!,
+        garments: { ...(out.scene!.garments ?? {}), ...choice.setGarments },
+      },
+    };
+  }
   if (choice.setOutfit) {
     // '$default' restores a character's baseline outfit (shirt reclaimed).
     const resolved: Record<string, string> = {};
@@ -677,6 +707,7 @@ function startParty(s: GameState, locId: string, spiceOverride?: number): GameSt
         player: loc.playerOutfit ?? playerDefaultOutfit(out),
         k: loc.kOutfit,
       },
+      garments: partyGarments(loc.id),
     },
   };
 }

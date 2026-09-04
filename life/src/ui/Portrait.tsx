@@ -3,7 +3,7 @@
 
 import type { Mood } from '../engine/types';
 import { MOOD_CAPTIONS } from '../content/krystalle';
-import { OUTFITS, type Outfit } from '../content/outfits';
+import { OUTFITS, type Outfit, type PortraitTop } from '../content/outfits';
 
 const SKIN = '#c98e6d';
 const SKIN_SHADE = '#b57a5a';
@@ -206,13 +206,17 @@ export function Portrait({
   mood,
   size = 132,
   outfitId,
+  top,
 }: {
   mood: Mood;
   size?: number;
   outfitId?: string;
+  /** Derived from the garment tracker; overrides the named outfit's shape. */
+  top?: PortraitTop;
 }) {
   const blush = mood === 'flushed' || mood === 'laughing';
-  const outfit = (outfitId && OUTFITS[outfitId]) || OUTFITS['k-sweater'];
+  const named = (outfitId && OUTFITS[outfitId]) || OUTFITS['k-sweater'];
+  const outfit = top ? { ...named, top } : named;
   return (
     <figure className={`portrait mood-${mood}`}>
       <svg viewBox="0 0 120 120" width={size} height={size} role="img" aria-label={`Krystalle looks ${mood}`}>

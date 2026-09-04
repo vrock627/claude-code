@@ -7,6 +7,7 @@ import { SCENES } from '../content/scenes';
 import { Portrait } from './Portrait';
 import { SceneArt } from './SceneArt';
 import { outfitLabel } from '../content/outfits';
+import { describe as describeGarments, portraitTop } from '../content/garments';
 import { PARTY_LOCATIONS } from '../content/lifeContent';
 import { isDebug } from '../engine/debug';
 import { LADDER } from '../engine/types';
@@ -73,16 +74,34 @@ export function SceneView({ s, dispatch }: { s: GameState; dispatch: Dispatch<Ac
       <div className="scene-body">
         {!isPhone && kOnScreen && (
           <aside className="scene-side">
-            <Portrait mood={mood} outfitId={s.scene.wardrobe.k} />
+            <Portrait
+              mood={mood}
+              outfitId={s.scene.wardrobe.k}
+              top={s.scene.garments?.k ? portraitTop(s.scene.garments.k) : undefined}
+            />
             {s.scene.cue && <p className="cue">{s.scene.cue}</p>}
-            {s.scene.wardrobe.player && (
-              <p className="player-outfit">You: {outfitLabel(s.scene.wardrobe.player)}</p>
+            {s.scene.garments ? (
+              <p className="player-outfit">
+                <b>Wearing</b>
+                <br />
+                Her: {describeGarments(s.scene.garments.k ?? {})}
+                <br />
+                You: {describeGarments(s.scene.garments.player ?? {})}
+              </p>
+            ) : (
+              s.scene.wardrobe.player && (
+                <p className="player-outfit">You: {outfitLabel(s.scene.wardrobe.player)}</p>
+              )
             )}
           </aside>
         )}
-        {!isPhone && !kOnScreen && s.scene.wardrobe.player && (
+        {!isPhone && !kOnScreen && (
           <aside className="scene-side scene-side-solo">
-            <p className="player-outfit">You: {outfitLabel(s.scene.wardrobe.player)}</p>
+            <p className="player-outfit">
+              You: {s.scene.garments
+                ? describeGarments(s.scene.garments.player ?? {})
+                : outfitLabel(s.scene.wardrobe.player)}
+            </p>
           </aside>
         )}
         <div className="scene-main">
