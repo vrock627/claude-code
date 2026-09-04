@@ -27,9 +27,12 @@ import {
   HOME_TIERS,
   JOB_TIERS,
   PARTY_INVITE_CHANCE,
-  PARTY_ROOMS,
+  PARTY_LOCATIONS,
+  PARTY_LOCATION_IDS,
   WARDROBE_TIERS,
 } from '../content/lifeContent';
+import { playerDefaultOutfit } from '../content/outfits';
+import { isDebug } from './debug';
 import { SCENES } from '../content/scenes';
 
 export type Action =
@@ -169,7 +172,17 @@ function startScene(
     ...s,
     seed,
     screen: 'scene',
-    scene: { sceneId, nodeId: scene.start, date, cue, vars: {} },
+    scene: {
+      sceneId,
+      nodeId: scene.start,
+      date,
+      cue,
+      vars: {},
+      wardrobe: {
+        player: playerDefaultOutfit(s),
+        ...(scene.outfits ? scene.outfits(s) : {}),
+      },
+    },
   };
 }
 
@@ -394,6 +407,17 @@ function chooseInScene(s: GameState, index: number): GameState {
     for (const f of choice.unflags) delete flags[f];
     out = { ...out, k: { ...out.k, flags } };
   }
+  if (choice.setOutfit) {
+    // '$default' restores a character's baseline outfit (shirt reclaimed).
+    const resolved: Record<string, string> = {};
+    for (const [who, outfit] of Object.entries(choice.setOutfit)) {
+      resolved[who] = outfit === '$default' && who === 'player' ? playerDefaultOutfit(out) : outfit;
+    }
+    out = {
+      ...out,
+      scene: { ...out.scene!, wardrobe: { ...out.scene!.wardrobe, ...resolved } },
+    };
+  }
   if (choice.setVars || choice.addVars) {
     const vars = { ...out.scene!.vars };
     for (const [k, v] of Object.entries(choice.setVars ?? {})) vars[k] = v;
@@ -557,19 +581,25 @@ function rollPartyInvite(s: GameState): GameState {
   if (r1.value >= PARTY_INVITE_CHANCE) return out;
   const r2 = nextRand(out.seed);
   const r3 = nextRand(r2.seed);
-  out = { ...out, seed: r3.seed };
+  const rLoc = nextRand(r3.seed);
+  out = { ...out, seed: rLoc.seed };
+  const loc = PARTY_LOCATIONS[PARTY_LOCATION_IDS[Math.floor(rLoc.value * PARTY_LOCATION_IDS.length)]];
   const day = out.day + 1 + Math.floor(r2.value * 2); // tomorrow or the day after
-  let block: TimeBlock = r3.value < 0.6 ? 2 : 3; // usually evening, sometimes late
+  let block: TimeBlock = loc.blocks[r3.value < 0.6 ? 0 : loc.blocks.length - 1];
   const pd = out.k.pendingDate;
-  if (pd && pd.day === day && pd.block === block) block = block === 2 ? 3 : 2;
+  if (pd && pd.day === day && pd.block === block) {
+    block = loc.blocks.find((b) => b !== block) ?? block;
+    if (pd.block === block) return out; // no clean slot — no invite this time
+  }
+  const when = `${day === out.day + 1 ? 'tomorrow' : 'day after tomorrow'} ${
+    block === 1 ? 'afternoon' : block === 2 ? 'evening' : 'late'
+  }`;
   return {
     ...out,
-    pendingParty: { day, block },
+    pendingParty: { day, block, loc: loc.id },
     toasts: [
       ...out.toasts,
-      `Dex — Sam’s cousin, knows everyone — grabs your shoulder on the way out: “House party, ${
-        day === out.day + 1 ? 'tomorrow' : 'day after tomorrow'
-      } ${block === 2 ? 'evening' : 'late'}. Bring nothing. Bring everything.”`,
+      `Dex — Sam’s cousin, knows everyone — grabs your shoulder on the way out: “${loc.name[0].toUpperCase()}${loc.name.slice(1)}, ${when}. Bring nothing. Bring everything.”`,
     ],
   };
 }
@@ -660,20 +690,25 @@ export function reducer(s: GameState, a: Action): GameState {
         pendingParty: null,
         energy: clamp(s.energy - 12, 0, 100),
       };
-      // Is she here tonight?
+      const loc = PARTY_LOCATIONS[pp.loc] ?? PARTY_LOCATIONS.house;
+      // Is she here tonight? (Debug mode: always, unless the route is dead.)
       const rK = nextRand(out.seed);
       const kChance = out.k.routeDead
         ? 0
         : out.k.met
           ? 0.5 + out.k.enthusiasm * 0.05
           : 0.4;
-      const kHere = rK.value < kChance;
-      // Party personality: overall vibe + which three of the five rooms exist.
-      const rV = nextRand(rK.seed);
-      const vibe = rV.value < 0.5 ? 'chill' : 'rowdy';
-      let seed = rV.seed;
-      const pool = [...PARTY_ROOMS];
-      const rooms: string[] = [];
+      const kHere = isDebug() ? !out.k.routeDead : rK.value < kChance;
+      // Party personality: spice level (location-weighted), an intro variant,
+      // and two rolled event rooms — plus the truth-or-dare circle, always.
+      const rS = nextRand(rK.seed);
+      const [w1, w2] = loc.spiceWeights;
+      const spice = rS.value < w1 ? 1 : rS.value < w1 + w2 ? 2 : 3;
+      const rI = nextRand(rS.seed);
+      const intro = rI.value < 0.5 ? 0 : 1;
+      let seed = rI.seed;
+      const pool = [...loc.rooms];
+      const rooms: string[] = ['tod'];
       while (rooms.length < 3) {
         const r = nextRand(seed);
         seed = r.seed;
@@ -709,7 +744,20 @@ export function reducer(s: GameState, a: Action): GameState {
           nodeId: 'arrive',
           date,
           cue: null,
-          vars: { kHere, kSpotted: false, vibe, rooms: rooms.join(','), drinks: 0 },
+          vars: {
+            kHere,
+            kSpotted: false,
+            loc: loc.id,
+            spice,
+            intro,
+            rooms: rooms.join(','),
+            drinks: 0,
+            beats: 0,
+          },
+          wardrobe: {
+            player: loc.playerOutfit ?? playerDefaultOutfit(out),
+            k: loc.kOutfit,
+          },
         },
       };
     }

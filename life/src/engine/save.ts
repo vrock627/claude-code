@@ -20,7 +20,9 @@ export function loadGame(): GameState | null {
     // Migrate saves from before the intelligence stat / party system.
     if (typeof state.stats.intelligence !== 'number') state.stats.intelligence = 2;
     if (state.pendingParty === undefined) state.pendingParty = null;
+    if (state.pendingParty && !state.pendingParty.loc) state.pendingParty.loc = 'house';
     if (state.scene && !state.scene.vars) state.scene.vars = {};
+    if (state.scene && !state.scene.wardrobe) state.scene.wardrobe = {};
     return state;
   } catch {
     return null;

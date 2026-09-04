@@ -401,6 +401,52 @@ button {
   40% { transform: translateY(-4px); }
 }
 
+.debug-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: baseline;
+  background: #101c14;
+  border-bottom: 1px solid rgba(111, 208, 140, 0.35);
+  padding: 6px 12px;
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 0.72rem;
+  color: #9fd8b0;
+}
+
+.debug-panel b {
+  color: #d6ffe2;
+}
+
+.debug-tag {
+  background: rgba(111, 208, 140, 0.2);
+  border-radius: 4px;
+  padding: 0 6px;
+  letter-spacing: 0.1em;
+}
+
+.debug-flags {
+  color: #6fa8d0;
+}
+
+.outfit-line {
+  color: var(--accent2);
+  font-style: normal;
+}
+
+.player-outfit {
+  font-size: 0.74rem;
+  color: var(--muted);
+  border-left: 2px solid rgba(255, 179, 71, 0.35);
+  padding-left: 8px;
+  margin: 0;
+  font-style: italic;
+}
+
+.scene-side-solo {
+  flex: 0 0 130px;
+}
+
 .cue {
   font-size: 0.82rem;
   font-style: italic;

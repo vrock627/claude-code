@@ -3,6 +3,7 @@
 
 import type { Mood } from '../engine/types';
 import { MOOD_CAPTIONS } from '../content/krystalle';
+import { OUTFITS, type Outfit } from '../content/outfits';
 
 const SKIN = '#c98e6d';
 const SKIN_SHADE = '#b57a5a';
@@ -10,6 +11,87 @@ const HAIR = '#241a1c';
 const HAIR_SHINE = '#3d2c30';
 const BLUSH = '#d96a6a';
 const LIP = '#a84c50';
+
+// Shoulders/top rendered from her current outfit so the portrait matches the
+// scene — scrubs at the café, a dress at dinner, a swimsuit at the pool.
+function Top({ outfit }: { outfit: Outfit }) {
+  const c = outfit.color;
+  const dark = '#00000030';
+  switch (outfit.top) {
+    case 'swim':
+      return (
+        <g>
+          {/* bare shoulders + straps */}
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={SKIN} />
+          <path d="M 20 120 q 8 -26 40 -26 l 0 26 z" fill={SKIN_SHADE} opacity={0.5} />
+          <path d="M 30 120 q 14 -14 30 -12 l 0 12 z" fill={c} />
+          <path d="M 90 120 q -14 -14 -30 -12 l 0 12 z" fill={c} />
+          <rect x="44" y="98" width="5" height="16" rx="2" fill={c} transform="rotate(14 46 106)" />
+          <rect x="71" y="98" width="5" height="16" rx="2" fill={c} transform="rotate(-14 74 106)" />
+        </g>
+      );
+    case 'dress':
+      return (
+        <g>
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={SKIN} />
+          <path d="M 24 120 q 10 -20 36 -19 q 26 -1 36 19 z" fill={c} />
+          <path d="M 24 120 q 10 -20 36 -19 l 0 19 z" fill={dark} />
+          <circle cx="60" cy="104" r="2" fill="#e8c15a" />
+        </g>
+      );
+    case 'jacket':
+      return (
+        <g>
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={c} />
+          <path d="M 52 96 l 8 8 l 8 -8 l 0 24 l -16 0 z" fill="#d8cfc4" />
+          <path d="M 38 99 l 14 -3 l 4 10 l -10 14 z" fill={dark} />
+          <path d="M 82 99 l -14 -3 l -4 10 l 10 14 z" fill={dark} />
+        </g>
+      );
+    case 'scrubs':
+      return (
+        <g>
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={c} />
+          <path d="M 52 95 l 8 10 l 8 -10 l -4 -1 l -4 4 l -4 -4 z" fill={dark} />
+          <rect x="70" y="106" width="12" height="9" rx="1.5" fill={dark} />
+        </g>
+      );
+    case 'windbreaker':
+      return (
+        <g>
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={c} />
+          <line x1="60" y1="95" x2="60" y2="120" stroke={dark} strokeWidth="2.4" />
+          <path d="M 20 120 q 8 -26 40 -26 l 0 4 q -28 0 -36 22 z" fill="#ffffff30" />
+        </g>
+      );
+    case 'towel':
+      return (
+        <g>
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={SKIN} />
+          {/* towel wrapped just under the shoulders */}
+          <path d="M 22 120 q 8 -18 38 -17 q 30 -1 38 17 z" fill={c} />
+          <path d="M 22 120 q 8 -18 38 -17 l 0 3 q -26 0 -34 14 z" fill={dark} />
+          <line x1="60" y1="103" x2="60" y2="120" stroke={dark} strokeWidth="2" />
+        </g>
+      );
+    case 'bare':
+      return (
+        <g>
+          {/* dark water up to the shoulders, moonlit ripple at the line */}
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={SKIN} />
+          <path d="M 14 112 q 20 -8 46 -4 q 30 4 48 2 l 0 12 l -94 0 z" fill={c} />
+          <path d="M 16 110 q 22 -6 44 -3 q 28 4 46 1" stroke="#bfe9f7" strokeWidth="1.6" fill="none" opacity="0.6" />
+        </g>
+      );
+    default: // sweater / tee
+      return (
+        <g>
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={c} />
+          <path d="M 20 120 q 8 -26 40 -26 l 0 26 z" fill={dark} />
+        </g>
+      );
+  }
+}
 
 function Freckles() {
   const dots: JSX.Element[] = [];
@@ -120,8 +202,17 @@ function Mouth({ mood }: { mood: Mood }) {
   }
 }
 
-export function Portrait({ mood, size = 132 }: { mood: Mood; size?: number }) {
+export function Portrait({
+  mood,
+  size = 132,
+  outfitId,
+}: {
+  mood: Mood;
+  size?: number;
+  outfitId?: string;
+}) {
   const blush = mood === 'flushed' || mood === 'laughing';
+  const outfit = (outfitId && OUTFITS[outfitId]) || OUTFITS['k-sweater'];
   return (
     <figure className={`portrait mood-${mood}`}>
       <svg viewBox="0 0 120 120" width={size} height={size} role="img" aria-label={`Krystalle looks ${mood}`}>
@@ -134,9 +225,8 @@ export function Portrait({ mood, size = 132 }: { mood: Mood; size?: number }) {
           <rect width="120" height="120" fill="#1b1420" />
           <circle cx="98" cy="18" r="26" fill="#2c1f33" />
           <circle cx="14" cy="104" r="30" fill="#231a2b" />
-          {/* shoulders */}
-          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill="#3d5a4f" />
-          <path d="M 20 120 q 8 -26 40 -26 l 0 26 z" fill="#365147" />
+          {/* shoulders / outfit */}
+          <Top outfit={outfit} />
           {/* neck */}
           <rect x="52" y="86" width="16" height="14" fill={SKIN_SHADE} rx="5" />
           {/* hair back */}
@@ -172,7 +262,15 @@ export function Portrait({ mood, size = 132 }: { mood: Mood; size?: number }) {
         </g>
         <rect x="0.5" y="0.5" width="119" height="119" rx="16" fill="none" stroke="rgba(255,255,255,0.14)" />
       </svg>
-      <figcaption>Krystalle — <em>{MOOD_CAPTIONS[mood]}</em></figcaption>
+      <figcaption>
+        Krystalle — <em>{MOOD_CAPTIONS[mood]}</em>
+        {outfitId && OUTFITS[outfitId] && (
+          <>
+            <br />
+            <span className="outfit-line">wearing {OUTFITS[outfitId].label}</span>
+          </>
+        )}
+      </figcaption>
     </figure>
   );
 }

@@ -15,6 +15,7 @@ export const DATE_DINNER: Scene = {
   isDate: true,
   venueId: 'dinner',
   start: 'arrive',
+  outfits: () => ({ k: 'k-reddress' }),
   nodes: {
     arrive: {
       id: 'arrive',
@@ -566,11 +567,43 @@ export const DATE_DINNER: Scene = {
     },
     stayWin: {
       id: 'stayWin',
-      text: 'She looks at you for a long, unhurried moment — then reaches over and turns off the lamp herself.',
+      text: 'She looks at you for a long, unhurried moment — checking one last instrument reading and liking what it says — then reaches over and turns off the lamp herself, takes your hand, and leads you through your own apartment like she already knows the way.',
       kLine: '“Okay, second draft.” Her voice is soft in the dark. “Final edit.”',
       mood: 'flushed',
+      next: 'night',
+      nextLabel: 'Follow her',
+    },
+    night: {
+      id: 'night',
+      text: 'The dark isn’t a curtain; it’s a room you’re both in. Her laugh, low against your ear when the zipper sticks and you both have to negotiate with it. The rain restarting against the window like applause from a polite distance. She is exactly who she’s been all night — sure of what she wants, funny about it, unhurried — and being wanted by someone that honest is its own kind of undoing. Time goes soft and generous, and neither of you performs a single second of it.',
+      kLine: 'Somewhere in there, against your shoulder: “For the record — I decided this at the awning. You were still doing math.”',
+      mood: 'flushed',
+      choices: [
+        {
+          text: 'Tell her the true thing the dark makes easier to say.',
+          effects: { comfort: 8, interest: 6 },
+          flags: ['nice'],
+          goto: 'afterglow',
+        },
+        {
+          text: 'Make her laugh one more time — because you can, even now.',
+          effects: { momentum: 6, interest: 5 },
+          flags: ['funny'],
+          goto: 'afterglow',
+        },
+        {
+          text: 'Say nothing. Hold her like the sentence ends here.',
+          effects: { comfort: 10 },
+          goto: 'afterglow',
+        },
+      ],
+    },
+    afterglow: {
+      id: 'afterglow',
+      text: 'After, tangled and warm, her head on your chest rising and falling with it, she traces something idle on your collarbone — a word, maybe, or a diagnosis. The rain has settled into its all-night registration. She tells you a small true thing she’s never said on a date, and falls asleep mid-sentence finishing it, and you stay awake a while just to be the one who heard it.',
+      mood: 'warm',
       next: 'morning',
-      nextLabel: '⸺',
+      nextLabel: 'Sleep finds you eventually',
     },
     stayLose: {
       id: 'stayLose',
