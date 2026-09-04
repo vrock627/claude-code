@@ -48,6 +48,7 @@ export const OUTFITS: Record<string, Outfit> = {
   'p-soaked': { id: 'p-soaked', label: 'street clothes, completely soaked', top: 'tee', color: '#33475c' },
   'p-boxers': { id: 'p-boxers', label: 'boxers and a ceremonial towel-cape — the table giveth not', top: 'swim', color: '#8a4a5c' },
   'p-towel': { id: 'p-towel', label: 'a pool towel and recent bravery', top: 'towel', color: '#d9c8a9' },
+  'p-mesh': { id: 'p-mesh', label: 'the chairman’s mesh tank top, won in a swap', top: 'tee', color: '#7a3550' },
 };
 
 // The player's default outfit follows their wardrobe tier.
