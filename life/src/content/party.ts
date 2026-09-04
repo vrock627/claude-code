@@ -230,6 +230,13 @@ const NODES: Record<string, SceneNode> = {
         setVars: { done_klater: true },
         goto: 'kLater',
       },
+      // ---- late-night events (spice-gated) ----
+      {
+        text: 'Midnight. Priya kills the pool lights and the deck starts counting down — the traditional plunge.',
+        cond: (s) => L(s) === 'pool' && sp(s) >= 3 && beats(s) >= 3 && !done(s, 'dip'),
+        setVars: { done_dip: true },
+        goto: 'dip',
+      },
       // ---- wind-down ----
       {
         text: 'One last lap before you go.',
@@ -534,7 +541,74 @@ const NODES: Record<string, SceneNode> = {
           onFail: 'stripOwnMeh',
         },
       },
+      {
+        text: 'Demand the rematch. Double or nothing — winner takes the pole.',
+        setOutfit: { player: 'p-shirtless' },
+        check: {
+          stat: 'fitness',
+          label: 'Double or nothing',
+          dc: 15,
+          onWin: 'stripRedeem',
+          onLose: 'stripBottom',
+          winEffects: { interest: 8, momentum: 12, mood: 6 },
+          winFlags: ['confident', 'sexy'],
+          loseEffects: { momentum: -4 },
+        },
+      },
     ],
+  },
+  stripRedeem: {
+    id: 'stripRedeem',
+    text: (s) =>
+      spotted(s)
+        ? 'Down goes the dynasty. You run six cups clean, reclaim your shirt from the banner pole to a standing ovation, and put it on with the slow ceremony of a knight re-armoring. Krystalle is on a chair leading the chant, which is your name, which is a lot to process.'
+        : 'Down goes the dynasty. You reclaim your shirt from the pole to a standing ovation and re-dress with full ceremony. The kazoo attempts a fanfare. The whiteboard now just says LEGEND.',
+    kLine: (s) => (spotted(s) ? '“COMEBACK OF THE SEASON. The file is now a shrine. I have concerns about the file.”' : ''),
+    choices: [
+      {
+        text: 'Retire forever at the summit.',
+        setOutfit: { player: '$default' },
+        goto: 'flow',
+      },
+    ],
+  },
+  stripBottom: {
+    id: 'stripBottom',
+    text: (s) =>
+      spotted(s)
+        ? 'The rematch is a massacre. Cup by cup the table takes its tax until you are standing in your boxers under the string lights while the commissioner, with genuine gravity, drapes a beach towel over your shoulders like a title belt. You are somehow still not the most underdressed person here — a streaker chose this exact moment to cross the lawn in nothing but a captain’s hat, to thunderous applause, pursued at a light jog by campus security. Krystalle has fully given up on composure; she is wheezing into her cup, one hand extended toward you in something between apology and applause.'
+        : 'The rematch is a massacre. You end up in your boxers under the string lights, towel-caped by the commissioner like defeated royalty — and are immediately upstaged by a streaker crossing the lawn in nothing but a captain’s hat, pursued at a light jog by campus security. The party awards him the win. Fair.',
+    kLine: (s) => (spotted(s) ? '“I want you to know—” wheeze “—that you lost to a HOUSE. A literal fraternity. And STILL placed second-worst-dressed. Tonight has been incredible.”' : ''),
+    choices: [
+      {
+        text: 'Take a bow. Wear the towel-cape like it was the plan all along.',
+        setOutfit: { player: 'p-boxers' },
+        judge: {
+          pass: (s) => !spotted(s) || m(s).interest >= 55,
+          onPass: 'stripBottomK',
+          onFail: 'stripBottomOof',
+        },
+      },
+    ],
+  },
+  stripBottomK: {
+    id: 'stripBottomK',
+    text: (s) =>
+      spotted(s)
+        ? 'You bow. The lawn loses it. And here is the strange arithmetic of a spice-three party: losing everything with total commitment plays better than winning carefully ever could. Krystalle crosses over, straightens your towel-cape with mock solemnity, and pats it flat.'
+        : 'You bow. The lawn loses it. Three strangers pledge allegiance to the cape. For the rest of the night you are “the double-or-nothing guy,” said with respect.',
+    kLine: (s) =>
+      spotted(s)
+        ? '“Superstar. Listen to me. This is the hardest I’ve laughed in a calendar year.” A beat, quieter, adjusting the cape one more time than it needed: “The confidence is doing you more favors than the shirt did. Don’t tell the shirt.”'
+        : '',
+    next: 'flow',
+    nextLabel: 'Reign, capewise',
+  },
+  stripBottomOof: {
+    id: 'stripBottomOof',
+    text: 'You bow; the lawn cheers; the bow is fine. But across the yard the math is different — some nights the towel-cape reads as legend, and some nights it reads as a man who didn’t know when to fold. Her laughter is real, and it is also the laughter you give a stranger’s misadventure, and you can hear the difference from here.',
+    next: 'flow',
+    nextLabel: 'Colder now, in several ways',
   },
   stripOwnGood: {
     id: 'stripOwnGood',
@@ -1111,6 +1185,178 @@ const NODES: Record<string, SceneNode> = {
     text: 'The philosophers induct you mid-debate (topic: whether fish know about rain). You contribute one theory, receive two compliments and a mild headrush, and exit poached and wiser.',
     next: 'flow',
     nextLabel: 'Poached and wiser',
+  },
+
+  // ================================================ MIDNIGHT PLUNGE (pool, spice 3)
+  dip: {
+    id: 'dip',
+    text: (s) =>
+      spotted(s)
+        ? 'The underwater lights die and the pool goes black-glass under the moon. A whoop travels the deck; towels are staked; the countdown starts at ten and the first swimsuits are already landing on deck chairs by seven. It’s the Marlowe’s worst-kept tradition and tonight it has quorum. Krystalle stands at the edge of the countdown crowd, arms crossed, grinning at the whole institution — unreadable, for once, about her own plans.'
+        : 'The underwater lights die and the pool goes black-glass under the moon. A whoop travels the deck; the countdown starts at ten, and the first swimsuits are already landing on deck chairs by seven. The Marlowe’s worst-kept tradition has quorum tonight.',
+    choices: [
+      {
+        text: 'Join the plunge. When in Rome — and Rome is counting down.',
+        check: {
+          stat: 'fitness',
+          label: 'Commit at “three”',
+          dc: 10,
+          onWin: 'dipIn',
+          onLose: 'dipIn',
+          winEffects: { mood: 8, momentum: 10 },
+          winFlags: ['confident'],
+          loseEffects: { mood: 6, momentum: 6 },
+        },
+        setOutfit: { player: 'p-towel' },
+      },
+      {
+        text: 'Catch her eye across the countdown. This one’s a two-person decision.',
+        cond: (s) => spotted(s) && dating(s),
+        judge: {
+          pass: (s) => s.k.stage >= 3 && m(s).comfort >= 68,
+          onPass: 'dipTogether',
+          onFail: 'dipDecline',
+        },
+      },
+      {
+        text: '“C’mon, everyone’s going in—” Press her toward the water.',
+        cond: (s) => spotted(s),
+        effects: { comfort: -12, interest: -4, momentum: -8 },
+        flags: ['tryhard'],
+        addVars: { beats: 1 },
+        goto: 'dipPressed',
+      },
+      {
+        text: 'Hold towels for the brave. Every tradition needs civilians.',
+        effects: { comfort: 4, mood: 4 },
+        flags: ['nice'],
+        addVars: { beats: 1 },
+        goto: 'dipWatch',
+      },
+    ],
+  },
+  dipIn: {
+    id: 'dipIn',
+    text: (s) =>
+      spotted(s) && dating(s) && s.k.stage >= 3 && m(s).comfort >= 68
+        ? 'You go in at “one” with the pack — cold shock, moon-white bubbles, the surface closing overhead like a held breath. When you come up, the pool is all voices and dark water, clothes abandoned on twenty deck chairs, everything below the surface the water’s business and no one else’s. And two arm-lengths away, hair slicked back and grinning like she got away with something: Krystalle. She made her own call at “four,” apparently. Her earrings are still on. Nothing else is the moon’s concern.'
+        : 'You go in at “one” with the pack — cold shock, moon-white bubbles, the whole deck’s clothes abandoned on chairs, the water keeping everyone’s counsel below the surface. You surface into a pool of laughing silhouettes and instantly understand the tradition: it isn’t about daring. It’s about how the city looks from water level with the lights off.',
+    kLine: (s) =>
+      spotted(s) && dating(s) && s.k.stage >= 3 && m(s).comfort >= 68
+        ? '“Don’t make it a thing, superstar.” Her voice is low and bright over the water. “The moon and I have an understanding. You can be in on it.”'
+        : '',
+    choices: [
+      {
+        text: 'Float on your back and let the tradition explain itself.',
+        effects: { mood: 8, comfort: 6, interest: 4 },
+        addVars: { beats: 1 },
+        goto: 'dipAfter',
+      },
+      {
+        text: 'Drift closer to her in the dark water.',
+        cond: (s) => spotted(s) && dating(s) && s.k.stage >= 3 && m(s).comfort >= 68,
+        move: 'leanClose',
+        moveWin: 'dipClose',
+        moveLose: 'dipCloseNo',
+        addVars: { beats: 1 },
+      },
+    ],
+  },
+  dipTogether: {
+    id: 'dipTogether',
+    text: 'She holds your look through “six” and “five,” and then — a decision arriving visibly, like weather — she laughs once at herself, hands her drink to a stranger, and tips her head toward the far end, away from the cannonball chaos. The two of you slip into the deep-end dark at “one” while the shallow end explodes. Her clothes end on the chair with her jacket; the water takes the rest of it into its confidence. What the moon gets is shoulders and collarbones and her slicked-back hair; what you get is her laugh, lower than usual, carrying across two feet of black water, and the understanding that she is exactly this spontaneous and has simply been waiting for the night to earn it.',
+    kLine: '“Okay,” she breathes, treading close, city lights doubled in the water between you. “Two truths: this was MY idea the second Priya touched the lights. And you were always getting invited. I just wanted to watch you do the math first.”',
+    mood: 'flushed',
+    choices: [
+      {
+        text: 'Close the two feet of black water.',
+        move: 'kiss',
+        moveWin: 'dipKiss',
+        moveLose: 'dipCloseNo',
+        addVars: { beats: 1 },
+      },
+      {
+        text: 'Stay at arm’s length and just be in on it with her — the moon, the water, the whole conspiracy.',
+        effects: { comfort: 10, interest: 8, momentum: 6 },
+        flags: ['confident'],
+        addVars: { beats: 1 },
+        goto: 'dipAfter',
+      },
+    ],
+  },
+  dipKiss: {
+    id: 'dipKiss',
+    text: 'Treading water makes it clumsy and the clumsiness makes it better — her hand finding your shoulder for ballast, both of you half-laughing into it, the cold of the water and the warmth of the kiss filing separate reports. The shallow-end chaos is a city away. When you separate she stays close, forehead to yours, both of you keeping each other afloat in the technical and every other sense.',
+    kLine: '“Cold water,” she says, against your cheek, in the voice of a scientist falsifying her own data. “That’s all this is. Extremely cold water.”',
+    mood: 'flushed',
+    next: 'dipAfter',
+    nextLabel: 'Until your teeth chatter',
+  },
+  dipClose: {
+    id: 'dipClose',
+    text: 'You drift; she lets you arrive. Shoulder to shoulder in the dark water, heads tipped back at the same patch of sky, the pool holding the two of you like a secret it intends to keep. Nobody performs anything. It’s the quietest place the party has.',
+    mood: 'flushed',
+    next: 'dipAfter',
+    nextLabel: 'The cold wins eventually',
+  },
+  dipCloseNo: {
+    id: 'dipCloseNo',
+    text: 'She reads the drift and backstrokes one easy stroke out of range, grinning, a boundary drawn in dark water with total good humor.',
+    kLine: '“Moon rules, superstar: everybody floats their own float. Tonight the water is a co-op, not a couple thing.”',
+    next: 'dipAfter',
+    nextLabel: 'Respect the co-op',
+  },
+  dipAfter: {
+    id: 'dipAfter',
+    text: (s) =>
+      spotted(s) && dating(s) && s.k.stage >= 3 && m(s).comfort >= 68
+        ? 'Out, eventually, when the shivering files a formal complaint — towels grabbed from the stack, hers wrapped to the collarbone and turbaned with expert speed, yours worn like a matador. You sit on the deck edge side by side, feet still in the black water, sharing the towel-warmth and a stranger’s abandoned bag of chips, steam rising off the hot tub crowd across the deck. Her shoulder is against yours and stays there.'
+        : 'Out, eventually, when the shivering wins — the deck a flapping chaos of towels and triumphant re-dressing, everyone suddenly best friends the way only shared bad ideas manage. Someone starts a round of applause for the pool itself. It deserves it.',
+    kLine: (s) =>
+      spotted(s) && dating(s) && s.k.stage >= 3 && m(s).comfort >= 68
+        ? '“For the file,” she says, watching the water settle, “tonight goes in the section I don’t show people.” She bumps your shoulder. “You’re in a lot of that section lately.”'
+        : '',
+    next: 'flow',
+    nextLabel: 'The night, warmer now',
+  },
+  dipDecline: {
+    id: 'dipDecline',
+    text: 'She catches your look, reads the invitation in it, and answers with a cheerful lifeguard’s headshake — then confiscates your towel to hold, which is somehow both a no and a promotion.',
+    kLine: '“Go! Represent us. I did the plunge in June, I have tenure. I’ll judge your form from here — the moon and I are on a break.”',
+    choices: [
+      {
+        text: 'Go in with the pack, then — she’s holding your towel, after all.',
+        setOutfit: { player: 'p-towel' },
+        effects: { mood: 6, momentum: 6, interest: 3 },
+        flags: ['confident'],
+        addVars: { beats: 1 },
+        goto: 'dipIn',
+      },
+      {
+        text: 'Stay dry with her instead. The countdown can have the others.',
+        effects: { comfort: 8, interest: 4 },
+        flags: ['nice'],
+        addVars: { beats: 1 },
+        goto: 'dipWatch',
+      },
+    ],
+  },
+  dipPressed: {
+    id: 'dipPressed',
+    text: 'It lands exactly as badly as every version of this sentence has ever landed at every pool since pools began. She doesn’t even stop smiling — she just plants her feet a half-inch more deliberately, and the temperature between you drops faster than the water would have.',
+    kLine: '“Funny thing about ‘everyone,’” she says, light as a closing door. “It’s a word people use when they’ve stopped asking about *someone.* I’m good right here.”',
+    next: 'flow',
+    nextLabel: 'Walk that back slowly',
+  },
+  dipWatch: {
+    id: 'dipWatch',
+    text: (s) =>
+      spotted(s)
+        ? 'The plunge detonates without you — a moonlit churn of noise and dark water. You and she work the towel stack like pit crew, wrapping shivering swimmers as they climb out, her doing triage-nurse efficiency jokes the whole time. It is, weirdly, a great way to spend a countdown: warm, dry, and laughing at the same chaos from the same square meter.'
+        : 'The plunge detonates without you. You work the towel stack like pit crew, wrapping the shivering as they climb out, collecting three new friends and one marriage proposal (retracted upon warming). Civilization needs its civilians.',
+    kLine: (s) => (spotted(s) ? '“We’re the emergency services of this party and I feel GREAT about it.”' : ''),
+    next: 'flow',
+    nextLabel: 'The deck steams gently',
   },
 
   // ======================================================== GRILL (pool)

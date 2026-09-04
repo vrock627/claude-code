@@ -407,9 +407,14 @@ function chooseInScene(s: GameState, index: number): GameState {
     out = { ...out, k: { ...out.k, flags } };
   }
   if (choice.setOutfit) {
+    // '$default' restores a character's baseline outfit (shirt reclaimed).
+    const resolved: Record<string, string> = {};
+    for (const [who, outfit] of Object.entries(choice.setOutfit)) {
+      resolved[who] = outfit === '$default' && who === 'player' ? playerDefaultOutfit(out) : outfit;
+    }
     out = {
       ...out,
-      scene: { ...out.scene!, wardrobe: { ...out.scene!.wardrobe, ...choice.setOutfit } },
+      scene: { ...out.scene!, wardrobe: { ...out.scene!.wardrobe, ...resolved } },
     };
   }
   if (choice.setVars || choice.addVars) {

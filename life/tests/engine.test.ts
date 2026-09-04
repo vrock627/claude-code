@@ -328,6 +328,45 @@ describe('reducer end-to-end', () => {
     expect(s.k.datesCompleted).toBe(dates0);
   });
 
+  it('$default outfit restores the wardrobe-tier baseline', () => {
+    let s = reducer(initialState(21), { type: 'NEW_GAME', seed: 21 });
+    s = {
+      ...s,
+      block: 2 as const,
+      pendingParty: { day: s.day, block: 2 as const, loc: 'frat' },
+    };
+    s = reducer(s, { type: 'GO_TO_PARTY' });
+    s = {
+      ...s,
+      scene: {
+        ...s.scene!,
+        nodeId: 'stripRedeem',
+        wardrobe: { ...s.scene!.wardrobe, player: 'p-shirtless' },
+        vars: { ...s.scene!.vars, loc: 'frat', spice: 3 },
+      },
+    };
+    s = reducer(s, { type: 'CHOOSE', index: 0 });
+    expect(s.scene?.wardrobe.player).toBe('p-basic');
+  });
+
+  it('the midnight plunge only appears at a spice-3 pool party, late', () => {
+    let s = reducer(initialState(21), { type: 'NEW_GAME', seed: 21 });
+    s = { ...s, block: 1 as const, pendingParty: { day: s.day, block: 1 as const, loc: 'pool' } };
+    s = reducer(s, { type: 'GO_TO_PARTY' });
+    const at = (vars: Record<string, string | number | boolean>) => {
+      const st = {
+        ...s,
+        scene: { ...s.scene!, nodeId: 'flow', vars: { ...s.scene!.vars, ...vars } },
+      };
+      return visibleChoices(st, currentNode(st)!).some((c) => c.text.startsWith('Midnight.'));
+    };
+    expect(at({ loc: 'pool', spice: 3, beats: 3 })).toBe(true);
+    expect(at({ loc: 'pool', spice: 2, beats: 3 })).toBe(false);
+    expect(at({ loc: 'pool', spice: 3, beats: 1 })).toBe(false);
+    expect(at({ loc: 'house', spice: 3, beats: 3 })).toBe(false);
+    expect(at({ loc: 'pool', spice: 3, beats: 3, done_dip: true })).toBe(false);
+  });
+
   it('a full scripted date can run through the reducer', () => {
     let s = reducer(initialState(11), { type: 'NEW_GAME', seed: 11 });
     s = {

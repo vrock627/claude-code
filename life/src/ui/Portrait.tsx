@@ -64,6 +64,25 @@ function Top({ outfit }: { outfit: Outfit }) {
           <path d="M 20 120 q 8 -26 40 -26 l 0 4 q -28 0 -36 22 z" fill="#ffffff30" />
         </g>
       );
+    case 'towel':
+      return (
+        <g>
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={SKIN} />
+          {/* towel wrapped just under the shoulders */}
+          <path d="M 22 120 q 8 -18 38 -17 q 30 -1 38 17 z" fill={c} />
+          <path d="M 22 120 q 8 -18 38 -17 l 0 3 q -26 0 -34 14 z" fill={dark} />
+          <line x1="60" y1="103" x2="60" y2="120" stroke={dark} strokeWidth="2" />
+        </g>
+      );
+    case 'bare':
+      return (
+        <g>
+          {/* dark water up to the shoulders, moonlit ripple at the line */}
+          <path d="M 20 120 q 8 -26 40 -26 q 32 0 40 26 z" fill={SKIN} />
+          <path d="M 14 112 q 20 -8 46 -4 q 30 4 48 2 l 0 12 l -94 0 z" fill={c} />
+          <path d="M 16 110 q 22 -6 44 -3 q 28 4 46 1" stroke="#bfe9f7" strokeWidth="1.6" fill="none" opacity="0.6" />
+        </g>
+      );
     default: // sweater / tee
       return (
         <g>
