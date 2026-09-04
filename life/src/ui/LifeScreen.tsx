@@ -32,6 +32,17 @@ export function LifeScreen({ s, dispatch }: { s: GameState; dispatch: Dispatch<A
           💚 It’s time — meet Krystalle at {DATE_VENUES.find((v) => v.id === pd!.venueId)?.name}
         </button>
       )}
+      {s.pendingParty && !(s.pendingParty.day === s.day && s.pendingParty.block === s.block) && (
+        <div className="banner">
+          🎉 Dex’s house party — {s.pendingParty.day === s.day ? 'tonight' : `day ${s.pendingParty.day}`},{' '}
+          {BLOCKS[s.pendingParty.block].toLowerCase()}. No RSVP. Just show.
+        </div>
+      )}
+      {s.pendingParty && s.pendingParty.day === s.day && s.pendingParty.block === s.block && (
+        <button className="banner banner-go" onClick={() => dispatch({ type: 'GO_TO_PARTY' })}>
+          🎉 The party’s on right now — head to Dex’s place
+        </button>
+      )}
 
       <section className="panel">
         <h3>

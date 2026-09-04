@@ -21,6 +21,11 @@ export function SceneView({ s, dispatch }: { s: GameState; dispatch: Dispatch<Ac
   const mood = node.mood ?? (s.scene.date ? deriveMood(s.scene.date) : 'neutral');
   const choices = visibleChoices(s, node);
   const roll = s.scene.date?.lastRoll ?? null;
+  // At a party she stays off-screen until you actually spot her — no portrait
+  // or body-language cues telegraphing her presence.
+  const kOnScreen =
+    s.scene.vars.kHere === undefined ||
+    (s.scene.vars.kHere === true && s.scene.vars.kSpotted === true);
 
   return (
     <div className={`scene ${isPhone ? 'scene-phone' : ''}`}>
@@ -29,7 +34,7 @@ export function SceneView({ s, dispatch }: { s: GameState; dispatch: Dispatch<Ac
         <h2>{scene.title}</h2>
       </header>
       <div className="scene-body">
-        {!isPhone && (
+        {!isPhone && kOnScreen && (
           <aside className="scene-side">
             <Portrait mood={mood} />
             {s.scene.cue && <p className="cue">{s.scene.cue}</p>}

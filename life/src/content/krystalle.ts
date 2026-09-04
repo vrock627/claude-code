@@ -72,6 +72,12 @@ export const MEMORY_FACTS: Record<string, MemoryFact> = {
     shareLine:
       '“I’m training for a half-marathon in the spring. Slowly. The app keeps sending me encouraging notifications like it can sense my regret.”',
   },
+  opm: {
+    id: 'opm',
+    label: 'Her dad’s OPM vinyl collection',
+    shareLine:
+      '“My dad shipped me his OPM records when I moved — Original Pilipino Music, the good stuff. VST & Company, Eraserheads. The crate weighs more than I do and I’d run into a fire for it.”',
+  },
 };
 
 export const CALLBACK_LINES: Record<string, string> = {
@@ -91,6 +97,8 @@ export const CALLBACK_LINES: Record<string, string> = {
     '“How is Biscuit?” she repeats, hand on chest. “She’s thriving, thank you for asking. Nobody asks.”',
   marathon:
     '“You remembered the half-marathon. I’ve run twice since I told you that, but the sentiment lands.”',
+  opm:
+    '“You looked up VST & Company?” She stares at you. “Okay. That’s— nobody does the homework. Dad would approve, and Dad approves of no one.”',
 };
 
 // ---------------------------------------------------------------------------

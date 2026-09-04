@@ -153,6 +153,14 @@ export const ACTIVITIES: Activity[] = [
     energy: -12,
   },
   {
+    id: 'study',
+    name: 'Library deep-dive',
+    desc: 'Actually learn things. Intelligence up.',
+    blocks: [0, 1, 2],
+    cost: 0,
+    energy: -14,
+  },
+  {
     id: 'cafe',
     name: 'Hang at Driftwood Café',
     desc: 'Good light, better people-watching.',
@@ -201,6 +209,17 @@ export const ENCOUNTER_SCENES: Record<string, string> = {
   park: 'enc-park',
   bar: 'enc-bar',
 };
+
+// ---------------------------------------------------------------------------
+// Parties
+// ---------------------------------------------------------------------------
+
+// Chance a social hang ends with someone pressing an address into your phone.
+export const PARTY_INVITE_CHANCE = 0.22;
+
+// The five things a given party might have going on; three get rolled per party.
+export const PARTY_ROOMS = ['pong', 'kitchen', 'rooftop', 'dance', 'vinyl'] as const;
+export type PartyRoom = (typeof PARTY_ROOMS)[number];
 
 // Date venues you can propose over text.
 export interface DateVenue {
