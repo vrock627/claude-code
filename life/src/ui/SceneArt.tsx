@@ -96,6 +96,98 @@ export function SceneArt({ art }: { art: string }) {
           <path d="M 226 70 q 0 14 10 16 v 6 h 4 v -6 q 10 -2 10 -16 z" fill="none" stroke="#e8cfd4" strokeWidth="2" opacity="0.8" />
         </svg>
       );
+    case 'frat':
+      return (
+        <svg className="scene-art" viewBox="0 0 400 110" preserveAspectRatio="xMidYMid slice" aria-hidden>
+          <defs>
+            <linearGradient id="g-frat" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#2a1420" />
+              <stop offset="1" stopColor="#3d1424" />
+            </linearGradient>
+          </defs>
+          <rect width="400" height="110" fill="url(#g-frat)" />
+          {/* greek banner */}
+          <path d="M 120 8 l 160 0 l -10 26 l -140 0 z" fill="#7a1f2e" />
+          <text x="200" y="27" textAnchor="middle" fill="#ffd166" fontSize="16" fontFamily="Georgia">ΣΡ</text>
+          {/* keg */}
+          <rect x="40" y="70" width="34" height="38" rx="8" fill="#8a8f98" />
+          <rect x="40" y="80" width="34" height="4" fill="#6a6f78" />
+          <rect x="52" y="62" width="10" height="10" rx="3" fill="#6a6f78" />
+          {/* pong table */}
+          <rect x="150" y="84" width="140" height="10" rx="3" fill="#274a2e" />
+          <rect x="156" y="94" width="8" height="16" fill="#183020" />
+          <rect x="276" y="94" width="8" height="16" fill="#183020" />
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <path
+              key={i}
+              d={`M ${160 + (i % 3) * 14 + Math.floor(i / 3) * 100} 72 l 10 0 l -1.6 12 l -6.8 0 z`}
+              fill="#d64545"
+            />
+          ))}
+          <circle cx="230" cy="66" r="5" fill="#fff" opacity="0.9" />
+          <circle cx="340" cy="30" r="2.4" fill="#ffd166" opacity="0.6" />
+        </svg>
+      );
+    case 'pool':
+      return (
+        <svg className="scene-art" viewBox="0 0 400 110" preserveAspectRatio="xMidYMid slice" aria-hidden>
+          <defs>
+            <linearGradient id="g-pool" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#8fd0e8" />
+              <stop offset="0.55" stopColor="#5fb8d8" />
+              <stop offset="0.56" stopColor="#1f8ab0" />
+              <stop offset="1" stopColor="#136a8f" />
+            </linearGradient>
+          </defs>
+          <rect width="400" height="110" fill="url(#g-pool)" />
+          <circle cx="60" cy="20" r="15" fill="#fff3c4" opacity="0.95" />
+          {/* water ripples */}
+          <path d="M 0 70 q 30 -5 60 0 t 60 0 t 60 0 t 60 0 t 60 0 t 60 0" stroke="#bfe9f7" strokeWidth="2.5" fill="none" opacity="0.7" />
+          <path d="M 0 88 q 30 -5 60 0 t 60 0 t 60 0 t 60 0 t 60 0 t 60 0" stroke="#bfe9f7" strokeWidth="2" fill="none" opacity="0.5" />
+          {/* floatie */}
+          <circle cx="290" cy="78" r="16" fill="#ff5fa0" />
+          <circle cx="290" cy="78" r="8" fill="#1f8ab0" />
+          {/* diving board */}
+          <rect x="20" y="52" width="52" height="5" rx="2" fill="#e8e3da" />
+          <rect x="24" y="57" width="8" height="14" fill="#c9c4bb" />
+          {/* beach ball */}
+          <circle cx="180" cy="84" r="9" fill="#fff" />
+          <path d="M 173 78 a 9 9 0 0 1 14 0 z" fill="#d64545" />
+          <path d="M 173 90 a 9 9 0 0 0 14 0 z" fill="#2f6a8a" />
+        </svg>
+      );
+    case 'roofparty':
+      return (
+        <svg className="scene-art" viewBox="0 0 400 110" preserveAspectRatio="xMidYMid slice" aria-hidden>
+          <defs>
+            <linearGradient id="g-roofp" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#141b33" />
+              <stop offset="1" stopColor="#232946" />
+            </linearGradient>
+          </defs>
+          <rect width="400" height="110" fill="url(#g-roofp)" />
+          <circle cx="330" cy="20" r="12" fill="#f2ecd8" opacity="0.9" />
+          {/* skyline */}
+          <g fill="#0c1122">
+            <rect x="0" y="58" width="34" height="52" />
+            <rect x="40" y="44" width="26" height="66" />
+            <rect x="72" y="62" width="30" height="48" />
+            <rect x="290" y="50" width="28" height="60" />
+            <rect x="324" y="64" width="36" height="46" />
+            <rect x="366" y="46" width="34" height="64" />
+          </g>
+          {/* lit windows */}
+          {[8, 18, 46, 52, 80, 296, 306, 332, 374, 384].map((x, i) => (
+            <rect key={i} x={x} y={54 + ((i * 13) % 40)} width="5" height="6" fill="#ffd166" opacity="0.75" />
+          ))}
+          {/* terrace rail + lights */}
+          <rect x="110" y="92" width="170" height="4" rx="2" fill="#3a4266" />
+          <path d="M 110 70 q 85 22 170 0" stroke="#3a4266" strokeWidth="2" fill="none" />
+          {[125, 155, 185, 215, 245, 268].map((x, i) => (
+            <circle key={x} cx={x} cy={78 + Math.sin(i) * 4} r="3" fill={['#ffd166', '#ff9f66', '#ffe9a8'][i % 3]} />
+          ))}
+        </svg>
+      );
     case 'party':
       return (
         <svg className="scene-art" viewBox="0 0 400 110" preserveAspectRatio="xMidYMid slice" aria-hidden>

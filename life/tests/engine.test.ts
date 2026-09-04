@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { currentNode, initialState, reducer, visibleChoices } from '../src/engine/reducer';
+import { PARTY_LOCATIONS } from '../src/content/lifeContent';
 import {
   effectiveRequirement,
   judgeMove,
@@ -39,7 +40,7 @@ function mkState(overrides: Partial<GameState> = {}, date: Partial<DateSession> 
     scene:
       date === null
         ? null
-        : { sceneId: 'date-coffee', nodeId: 'arrive', date: mkDate(date), cue: null, vars: {} },
+        : { sceneId: 'date-coffee', nodeId: 'arrive', date: mkDate(date), cue: null, vars: {}, wardrobe: {} },
     ...overrides,
   };
   return s;
@@ -283,12 +284,13 @@ describe('reducer end-to-end', () => {
     }
     expect(s.pendingParty).not.toBeNull();
     expect(s.pendingParty!.day).toBeGreaterThan(s.day);
-    expect([2, 3]).toContain(s.pendingParty!.block);
+    expect([1, 2, 3]).toContain(s.pendingParty!.block);
+    expect(Object.keys(PARTY_LOCATIONS)).toContain(s.pendingParty!.loc);
   });
 
   it('an unattended party invite expires overnight', () => {
     let s = reducer(initialState(7), { type: 'NEW_GAME', seed: 7 });
-    s = { ...s, pendingParty: { day: s.day, block: 2 as const } };
+    s = { ...s, pendingParty: { day: s.day, block: 2 as const, loc: 'house' } };
     s = reducer(s, { type: 'SLEEP' });
     expect(s.pendingParty).toBeNull();
   });
@@ -298,7 +300,7 @@ describe('reducer end-to-end', () => {
     s = {
       ...s,
       block: 2 as const,
-      pendingParty: { day: s.day, block: 2 as const },
+      pendingParty: { day: s.day, block: 2 as const, loc: 'house' },
       k: { ...s.k, met: true, hasNumber: true, firstTextDone: true, stage: 3, datesCompleted: 1 },
     };
     const dates0 = s.k.datesCompleted;
@@ -306,8 +308,11 @@ describe('reducer end-to-end', () => {
     expect(s.screen).toBe('scene');
     expect(s.scene?.sceneId).toBe('party');
     expect(s.pendingParty).toBeNull();
-    expect(typeof s.scene?.vars.vibe).toBe('string');
-    expect(String(s.scene?.vars.rooms).split(',')).toHaveLength(3);
+    expect([1, 2, 3]).toContain(Number(s.scene?.vars.spice));
+    const rooms = String(s.scene?.vars.rooms).split(',');
+    expect(rooms).toHaveLength(3);
+    expect(rooms).toContain('tod');
+    expect(s.scene?.wardrobe.player).toBeTruthy();
     let guard = 0;
     while (s.scene && guard++ < 300) {
       const node = currentNode(s);
@@ -353,5 +358,68 @@ describe('reducer end-to-end', () => {
     expect(guard).toBeLessThan(200);
     expect(s.screen).toBe('life');
     expect(s.k.lastDateDay).toBeGreaterThan(0);
+  });
+});
+
+describe('party v2: locations, spice, outfits, truth or dare', () => {
+  function startParty(seed: number, loc: string): GameState {
+    let s = reducer(initialState(seed), { type: 'NEW_GAME', seed });
+    s = {
+      ...s,
+      block: 2 as const,
+      pendingParty: { day: s.day, block: 2 as const, loc },
+      k: { ...s.k, met: true, hasNumber: true, firstTextDone: true, stage: 3, datesCompleted: 1 },
+    };
+    return reducer(s, { type: 'GO_TO_PARTY' });
+  }
+
+  it('pool parties put everyone in swimwear', () => {
+    const s = startParty(5, 'pool');
+    expect(s.scene?.wardrobe.player).toBe('p-swim');
+    expect(s.scene?.wardrobe.k).toBe('k-swim');
+  });
+
+  it('every location rolls a truth-or-dare circle, a spice level, and its own id', () => {
+    for (const loc of Object.keys(PARTY_LOCATIONS)) {
+      const s = startParty(11, loc);
+      expect(String(s.scene?.vars.rooms).split(',')).toContain('tod');
+      expect([1, 2, 3]).toContain(Number(s.scene?.vars.spice));
+      expect(s.scene?.vars.loc).toBe(loc);
+    }
+  });
+
+  it('strip pong only appears at a spice-3 frat party', () => {
+    let s = startParty(7, 'frat');
+    s = {
+      ...s,
+      scene: { ...s.scene!, nodeId: 'pong', vars: { ...s.scene!.vars, spice: 3, rooms: 'tod,pong,keg' } },
+    };
+    expect(visibleChoices(s, currentNode(s)!).some((c) => c.text.includes('STRIP PONG'))).toBe(true);
+    const mild = { ...s, scene: { ...s.scene!, vars: { ...s.scene!.vars, spice: 1 } } };
+    expect(visibleChoices(mild, currentNode(mild)!).some((c) => c.text.includes('STRIP PONG'))).toBe(false);
+  });
+
+  it('losing your shirt to a dare is tracked in the scene wardrobe', () => {
+    let s = startParty(7, 'frat');
+    s = { ...s, scene: { ...s.scene!, nodeId: 'todDare1Shirt', vars: { ...s.scene!.vars, spice: 3 } } };
+    s = reducer(s, { type: 'CHOOSE', index: 0 });
+    expect(s.scene?.wardrobe.player).toBe('p-shirtless');
+  });
+
+  it('all four locations play through to the end', () => {
+    for (const loc of Object.keys(PARTY_LOCATIONS)) {
+      let s = startParty(13, loc);
+      let guard = 0;
+      while (s.scene && guard++ < 300) {
+        const node = currentNode(s);
+        if (!node) break;
+        const choices = visibleChoices(s, node);
+        const leaveIdx = choices.findIndex((c) => c.text.startsWith('Call it a night'));
+        const idx = guard > 14 && leaveIdx >= 0 ? leaveIdx : 0;
+        s = choices.length > 0 ? reducer(s, { type: 'CHOOSE', index: idx }) : reducer(s, { type: 'CONTINUE' });
+      }
+      expect(guard, `walk at ${loc}`).toBeLessThan(300);
+      expect(s.screen).toBe('life');
+    }
   });
 });

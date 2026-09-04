@@ -401,6 +401,24 @@ button {
   40% { transform: translateY(-4px); }
 }
 
+.outfit-line {
+  color: var(--accent2);
+  font-style: normal;
+}
+
+.player-outfit {
+  font-size: 0.74rem;
+  color: var(--muted);
+  border-left: 2px solid rgba(255, 179, 71, 0.35);
+  padding-left: 8px;
+  margin: 0;
+  font-style: italic;
+}
+
+.scene-side-solo {
+  flex: 0 0 130px;
+}
+
 .cue {
   font-size: 0.82rem;
   font-style: italic;

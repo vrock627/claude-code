@@ -15,6 +15,7 @@ export const DATE_BAR: Scene = {
   isDate: true,
   venueId: 'barnight',
   start: 'arrive',
+  outfits: () => ({ k: 'k-leather' }),
   nodes: {
     arrive: {
       id: 'arrive',

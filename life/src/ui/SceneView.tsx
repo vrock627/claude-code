@@ -6,6 +6,8 @@ import type { GameState } from '../engine/types';
 import { SCENES } from '../content/scenes';
 import { Portrait } from './Portrait';
 import { SceneArt } from './SceneArt';
+import { outfitLabel } from '../content/outfits';
+import { PARTY_LOCATIONS } from '../content/lifeContent';
 
 function asText(v: string | ((s: GameState) => string) | undefined, s: GameState): string {
   if (v === undefined) return '';
@@ -18,6 +20,10 @@ export function SceneView({ s, dispatch }: { s: GameState; dispatch: Dispatch<Ac
   if (!scene || !node || !s.scene) return null;
 
   const isPhone = scene.art === 'phone';
+  // Parties draw their art and title from the rolled location.
+  const partyLoc = s.scene.vars.loc ? PARTY_LOCATIONS[String(s.scene.vars.loc)] : null;
+  const artId = partyLoc?.art ?? scene.art;
+  const title = partyLoc ? partyLoc.name[0].toUpperCase() + partyLoc.name.slice(1) : scene.title;
   const mood = node.mood ?? (s.scene.date ? deriveMood(s.scene.date) : 'neutral');
   const choices = visibleChoices(s, node);
   const roll = s.scene.date?.lastRoll ?? null;
@@ -30,14 +36,22 @@ export function SceneView({ s, dispatch }: { s: GameState; dispatch: Dispatch<Ac
   return (
     <div className={`scene ${isPhone ? 'scene-phone' : ''}`}>
       <header className="scene-head">
-        <SceneArt art={scene.art} />
-        <h2>{scene.title}</h2>
+        <SceneArt art={artId} />
+        <h2>{title}</h2>
       </header>
       <div className="scene-body">
         {!isPhone && kOnScreen && (
           <aside className="scene-side">
-            <Portrait mood={mood} />
+            <Portrait mood={mood} outfitId={s.scene.wardrobe.k} />
             {s.scene.cue && <p className="cue">{s.scene.cue}</p>}
+            {s.scene.wardrobe.player && (
+              <p className="player-outfit">You: {outfitLabel(s.scene.wardrobe.player)}</p>
+            )}
+          </aside>
+        )}
+        {!isPhone && !kOnScreen && s.scene.wardrobe.player && (
+          <aside className="scene-side scene-side-solo">
+            <p className="player-outfit">You: {outfitLabel(s.scene.wardrobe.player)}</p>
           </aside>
         )}
         <div className="scene-main">

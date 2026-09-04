@@ -21,6 +21,7 @@ export const ENC_CAFE: Scene = {
   isDate: true,
   venueId: 'cafe',
   start: 'open',
+  outfits: () => ({ k: 'k-scrubs' }),
   nodes: {
     open: {
       id: 'open',
@@ -366,6 +367,7 @@ export const ENC_PARK: Scene = {
   isDate: true,
   venueId: 'park',
   start: 'open',
+  outfits: () => ({ k: 'k-windbreaker' }),
   nodes: {
     open: {
       id: 'open',
@@ -657,6 +659,7 @@ export const ENC_BAR: Scene = {
   isDate: true,
   venueId: 'bar',
   start: 'open',
+  outfits: () => ({ k: 'k-leather' }),
   nodes: {
     open: {
       id: 'open',

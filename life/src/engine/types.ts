@@ -177,6 +177,10 @@ export interface Choice {
   // count, etc. setVars assigns; addVars increments numeric vars.
   setVars?: Record<string, string | number | boolean>;
   addVars?: Record<string, number>;
+  // Outfit changes mid-scene (a dare, a dip in the pool): keys are character
+  // ids ('player', 'k'), values are outfit ids from content/outfits.ts. The
+  // scene's wardrobe stays consistent until something changes it.
+  setOutfit?: Record<string, string>;
   // Conditional branch decided at click time by hidden state — e.g. she only
   // says yes to giving her number if the meters earned it.
   judge?: { pass: (s: GameState) => boolean; onPass: string; onFail: string };
@@ -204,6 +208,9 @@ export interface Scene {
   isDate?: boolean;
   venueId?: string;
   start: string;
+  // Scene-appropriate starting outfits (a dress at dinner, scrubs at the
+  // café). Party outfits are set by location in the reducer instead.
+  outfits?: (s: GameState) => Record<string, string>;
   nodes: Record<string, SceneNode>;
 }
 
@@ -213,6 +220,8 @@ export interface SceneState {
   date: DateSession | null;
   cue: string | null; // latest body-language cue line
   vars: Record<string, string | number | boolean>; // scene-local dynamic state
+  // What everyone is wearing this scene, by character id ('player', 'k').
+  wardrobe: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +243,7 @@ export interface GameState {
   rentMissed: number;
   k: KrystalleState;
   // A standing party invite: fires on that day/block, expires if skipped.
-  pendingParty: { day: number; block: TimeBlock } | null;
+  pendingParty: { day: number; block: TimeBlock; loc: string } | null;
   scene: SceneState | null;
   seed: number; // RNG state (mulberry32), advanced on each draw
   toasts: string[];

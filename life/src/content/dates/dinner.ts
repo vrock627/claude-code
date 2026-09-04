@@ -15,6 +15,7 @@ export const DATE_DINNER: Scene = {
   isDate: true,
   venueId: 'dinner',
   start: 'arrive',
+  outfits: () => ({ k: 'k-reddress' }),
   nodes: {
     arrive: {
       id: 'arrive',

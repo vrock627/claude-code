@@ -217,9 +217,62 @@ export const ENCOUNTER_SCENES: Record<string, string> = {
 // Chance a social hang ends with someone pressing an address into your phone.
 export const PARTY_INVITE_CHANCE = 0.22;
 
-// The five things a given party might have going on; three get rolled per party.
-export const PARTY_ROOMS = ['pong', 'kitchen', 'rooftop', 'dance', 'vinyl'] as const;
-export type PartyRoom = (typeof PARTY_ROOMS)[number];
+// Party locations. Each rolls its own event rooms (2 from the pool — plus the
+// truth-or-dare circle, which every party has somewhere) and skews its own
+// spice level: 1 mellow, 2 lively, 3 wild. Spice changes dialogue, choices,
+// and how far the games go.
+export interface PartyLocation {
+  id: string;
+  name: string; // banner / invite name
+  blocks: TimeBlock[]; // when this kind of party happens
+  rooms: string[]; // event pool, 2 rolled per party
+  spiceWeights: [number, number, number]; // odds of spice 1 / 2 / 3
+  art: string;
+  kOutfit: string;
+  playerOutfit?: string; // override (pool = swimwear); default = wardrobe tier
+}
+
+export const PARTY_LOCATIONS: Record<string, PartyLocation> = {
+  house: {
+    id: 'house',
+    name: 'Dex’s house party',
+    blocks: [2, 3],
+    rooms: ['pong', 'kitchen', 'dance', 'vinyl'],
+    spiceWeights: [0.5, 0.35, 0.15],
+    art: 'party',
+    kOutfit: 'k-leather',
+  },
+  frat: {
+    id: 'frat',
+    name: 'the Sigma Rho blowout',
+    blocks: [2, 3],
+    rooms: ['pong', 'keg', 'dance', 'cards'],
+    spiceWeights: [0.1, 0.4, 0.5],
+    art: 'frat',
+    kOutfit: 'k-crop',
+  },
+  pool: {
+    id: 'pool',
+    name: 'a pool party at the Marlowe',
+    blocks: [1, 2],
+    rooms: ['swim', 'chicken', 'hottub', 'grill'],
+    spiceWeights: [0.3, 0.45, 0.25],
+    art: 'pool',
+    kOutfit: 'k-swim',
+    playerOutfit: 'p-swim',
+  },
+  rooftop: {
+    id: 'rooftop',
+    name: 'a rooftop party downtown',
+    blocks: [2, 3],
+    rooms: ['telescope', 'acoustic', 'skyline', 'slowdance'],
+    spiceWeights: [0.6, 0.3, 0.1],
+    art: 'roofparty',
+    kOutfit: 'k-wrap',
+  },
+};
+
+export const PARTY_LOCATION_IDS = Object.keys(PARTY_LOCATIONS);
 
 // Date venues you can propose over text.
 export interface DateVenue {
