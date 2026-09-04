@@ -274,10 +274,24 @@ export function pickCue(d: DateSession, seed: number): { cue: string; seed: numb
 // Starting meters + scoring
 // ---------------------------------------------------------------------------
 
+// Where the ladder already stands when a scene opens. You do not re-earn
+// hand-holding with your girlfriend: an established relationship starts part
+// way up, so a single bold move isn't scored as skipping four rungs.
+export function startLadder(s: GameState): number {
+  if (s.k.stage >= 4) return stepIndex('makeOut') - 1;
+  if (s.k.stage >= 3) return stepIndex('kiss') - 1;
+  if (s.k.stage >= 2) return stepIndex('lightTouch') - 1;
+  return -1;
+}
+
 export function startMeters(s: GameState, dateNumber: number): DateMeters {
   const f = s.k.flags;
   let interest = 34 + s.k.enthusiasm * 3 + (f.funny ? 4 : 0) + (f.smart ? 3 : 0);
   let comfort = 26 + s.k.enthusiasm * 3 + (f.nice ? 5 : 0) + (f.gentleman ? 4 : 0);
+  // Where you already stand with her carries into the room. A girlfriend does
+  // not arrive at stranger-level comfort.
+  interest += [0, 3, 8, 17, 26][Math.min(4, s.k.stage)];
+  comfort += [0, 4, 10, 22, 32][Math.min(4, s.k.stage)];
   if (dateNumber >= 2) {
     interest += 8;
     comfort += 10;
@@ -286,9 +300,12 @@ export function startMeters(s: GameState, dateNumber: number): DateMeters {
   if (f.boring) interest -= 8;
   // Showing up put together matters most early.
   comfort += Math.min(6, s.wardrobeTier * 2);
+  // The ceiling rises with the relationship too, or an established couple
+  // would be pinned at the same opening numbers as a first date.
+  const cap = 66 + Math.min(4, s.k.stage) * 6;
   return {
-    interest: clamp(interest, 5, 70),
-    comfort: clamp(comfort, 5, 70),
+    interest: clamp(interest, 5, cap),
+    comfort: clamp(comfort, 5, cap),
     // Arriving in a good headspace shows: mood feeds opening momentum.
     momentum: clamp(40 + Math.round((s.mood - 50) / 5), 20, 60),
   };

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { currentNode, initialState, reducer, visibleChoices } from '../src/engine/reducer';
 import { PARTY_LOCATIONS } from '../src/content/lifeContent';
-import { eligible, rollDare } from '../src/content/dares';
+import { CIRCLE, eligible, rollDare, rollNpc } from '../src/content/dares';
 import {
   effectiveRequirement,
   judgeMove,
@@ -421,6 +421,64 @@ describe('reducer end-to-end', () => {
     expect(
       visibleChoices(late, currentNode(late)!).some((c) => c.text.startsWith('Midnight.'))
     ).toBe(true);
+  });
+
+  it('an established relationship arrives warm, not at stranger level', () => {
+    const at = (stage: number, dates: number) => {
+      let s = reducer(initialState(9), { type: 'NEW_GAME', seed: 9 });
+      s = {
+        ...s,
+        k: { ...s.k, met: true, hasNumber: stage >= 2, stage, datesCompleted: dates, enthusiasm: 1 },
+      };
+      return reducer(s, { type: 'DEBUG_PARTY', loc: 'house', spice: 3 });
+    };
+    const acquaintance = at(1, 0).scene!.date!;
+    const girlfriend = at(4, 3).scene!.date!;
+    expect(girlfriend.meters.comfort).toBeGreaterThan(acquaintance.meters.comfort + 25);
+    expect(girlfriend.meters.interest).toBeGreaterThan(acquaintance.meters.interest + 20);
+    // ...and she doesn't make her boyfriend re-earn hand-holding.
+    expect(acquaintance.ladder).toBe(-1);
+    expect(girlfriend.ladder).toBeGreaterThanOrEqual(4);
+  });
+
+  it('escalation stays gated early and opens up late', () => {
+    const verdict = (stage: number, dates: number, step: 'kiss' | 'makeOut') => {
+      let s = reducer(initialState(9), { type: 'NEW_GAME', seed: 9 });
+      s = {
+        ...s,
+        k: {
+          ...s.k,
+          met: true,
+          hasNumber: stage >= 2,
+          stage,
+          datesCompleted: dates,
+          enthusiasm: 2,
+          flags: stage >= 4 ? { confident: true, sexy: true, nice: true } : {},
+        },
+      };
+      s = reducer(s, { type: 'DEBUG_PARTY', loc: 'house', spice: 3 });
+      s = { ...s, scene: { ...s.scene!, vars: { ...s.scene!.vars, kSpotted: true } } };
+      return judgeMove(s, step).kind;
+    };
+    // A near-stranger cannot kiss her at a party, however the dice land.
+    expect(verdict(1, 0, 'kiss')).toBe('too-fast');
+    // Her boyfriend can — that was the bug: he couldn't.
+    expect(verdict(4, 3, 'kiss')).toBe('auto-success');
+    expect(['auto-success', 'risky']).toContain(verdict(4, 3, 'makeOut'));
+  });
+
+  it('dares also land on other people in the circle', () => {
+    let s = reducer(initialState(9), { type: 'NEW_GAME', seed: 9 });
+    s = reducer(s, { type: 'DEBUG_PARTY', loc: 'house', spice: 2 });
+    const pool = eligible({
+      ...s,
+      scene: { ...s.scene!, vars: { ...s.scene!.vars, kSpotted: true, spice: 2, heat: 2 } },
+    });
+    expect(pool.some((d) => d.target === 'npc')).toBe(true);
+    // The circle is cast from the venue's roster.
+    const names = new Set(Array.from({ length: 12 }, (_, i) => rollNpc(s, i / 12)));
+    expect([...names].every((n) => CIRCLE.house.includes(n))).toBe(true);
+    expect(names.size).toBeGreaterThan(1);
   });
 
   it('a full scripted date can run through the reducer', () => {
