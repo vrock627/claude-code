@@ -32,6 +32,7 @@ import {
   WARDROBE_TIERS,
 } from '../content/lifeContent';
 import { playerDefaultOutfit } from '../content/outfits';
+import { isDebug } from './debug';
 import { SCENES } from '../content/scenes';
 
 export type Action =
@@ -690,14 +691,14 @@ export function reducer(s: GameState, a: Action): GameState {
         energy: clamp(s.energy - 12, 0, 100),
       };
       const loc = PARTY_LOCATIONS[pp.loc] ?? PARTY_LOCATIONS.house;
-      // Is she here tonight?
+      // Is she here tonight? (Debug mode: always, unless the route is dead.)
       const rK = nextRand(out.seed);
       const kChance = out.k.routeDead
         ? 0
         : out.k.met
           ? 0.5 + out.k.enthusiasm * 0.05
           : 0.4;
-      const kHere = rK.value < kChance;
+      const kHere = isDebug() ? !out.k.routeDead : rK.value < kChance;
       // Party personality: spice level (location-weighted), an intro variant,
       // and two rolled event rooms — plus the truth-or-dare circle, always.
       const rS = nextRand(rK.seed);

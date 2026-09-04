@@ -8,6 +8,8 @@ import { Portrait } from './Portrait';
 import { SceneArt } from './SceneArt';
 import { outfitLabel } from '../content/outfits';
 import { PARTY_LOCATIONS } from '../content/lifeContent';
+import { isDebug } from '../engine/debug';
+import { LADDER } from '../engine/types';
 
 function asText(v: string | ((s: GameState) => string) | undefined, s: GameState): string {
   if (v === undefined) return '';
@@ -33,8 +35,31 @@ export function SceneView({ s, dispatch }: { s: GameState; dispatch: Dispatch<Ac
     s.scene.vars.kHere === undefined ||
     (s.scene.vars.kHere === true && s.scene.vars.kSpotted === true);
 
+  const d = s.scene.date;
+  const debug = isDebug();
+
   return (
     <div className={`scene ${isPhone ? 'scene-phone' : ''}`}>
+      {debug && d && (
+        <div className="debug-panel">
+          <span className="debug-tag">DEBUG</span>
+          <span>interest <b>{Math.round(d.meters.interest)}</b></span>
+          <span>comfort <b>{Math.round(d.meters.comfort)}</b></span>
+          <span>momentum <b>{Math.round(d.meters.momentum)}</b></span>
+          <span>strikes <b>{d.strikes}</b></span>
+          <span>ladder <b>{d.ladder >= 0 ? LADDER[d.ladder] : '—'}</b></span>
+          <span>date# <b>{d.dateNumber}</b></span>
+          {s.scene.vars.spice !== undefined && (
+            <span>spice <b>{String(s.scene.vars.spice)}</b></span>
+          )}
+          {s.scene.vars.kHere !== undefined && (
+            <span>K {s.scene.vars.kHere ? (s.scene.vars.kSpotted ? 'spotted' : 'here, unspotted') : 'absent'}</span>
+          )}
+          <span className="debug-flags">
+            [{Object.keys(s.k.flags).join(', ') || 'no flags'}]
+          </span>
+        </div>
+      )}
       <header className="scene-head">
         <SceneArt art={artId} />
         <h2>{title}</h2>

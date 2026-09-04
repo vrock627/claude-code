@@ -1860,7 +1860,7 @@ const NODES: Record<string, SceneNode> = {
           ? 'The bottle stops on Krystalle. The circle, gently: \u201cMost trouble the scooter ever got you into.\u201d She\u2019s mid-story in four seconds, gesturing with somebody else\u2019s drink.'
           : sp(s) === 2
             ? 'The bottle stops on Krystalle. The circle smells blood: \u201cOkay \u2014 who HERE would you trust to drive Biscuit?\u201d A test with one right answer and twelve wrong ones. The circle looks at you. She looks at the ceiling.'
-            : 'The bottle stops on Krystalle, and someone \u2014 emboldened by jungle-juice courage \u2014 pushes past the line: a dare with her name in it that lands too personal, too public. The circle\u2019s laugh goes uncertain. Her smile stays up. Her shoulders don\u2019t.';
+            : 'The bottle stops on Krystalle. A guy in a backwards cap \u2014 three drinks past his own judgment \u2014 grins around the circle: \u201cDare. Lap dance for the birthday boy. Full song, no skips.\u201d The laughter drops half a register; half the circle checks her face to see how it landed. She sets her cup down, unhurried, and looks straight at him. The smile stays on. The eyes above it don\u2019t.';
       return q;
     },
     choices: [
@@ -1943,7 +1943,7 @@ const NODES: Record<string, SceneNode> = {
     id: 'todR3',
     text: (s) => {
       if (sp(s) >= 3 && spotted(s) && !s.k.flags.creep)
-        return 'Final round, and the bottle \u2014 spun by the chairman with the showmanship of a man who knows exactly what he\u2019s doing \u2014 stops on you. The circle confers for two seconds, which is how long it takes twelve people to agree on the obvious. \u201cDare,\u201d the chairman announces, \u201cwas not requested, and yet.\u201d He points from you to Krystalle. The circle detonates. The dare requires no further wording.';
+        return 'Final round, and the bottle \u2014 spun by the chairman with the showmanship of a man who knows exactly what he\u2019s doing \u2014 stops on you. The circle confers for two seconds, which is how long it takes twelve people to agree on the obvious. \u201cDare,\u201d the chairman announces, \u201cwas not requested, and yet: kiss her. One kiss, circle as witness, no tongue unless the lady legislates otherwise.\u201d He points from you to Krystalle. The circle detonates.';
       if (sp(s) === 2)
         return 'Final round. The bottle finds you again \u2014 the chairman swears it\u2019s random \u2014 and the circle, mellowing toward last call, asks for a closer: \u201cBest night of this year. Go.\u201d';
       return 'Final round. The shoebox\u2019s last card is a group dare: the entire circle must howl at the moon/ceiling/skylight for ten seconds. It is, structurally, a treaty.';
