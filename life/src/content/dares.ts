@@ -19,7 +19,7 @@ export interface Dare {
   kind: DareKind;
   tier: 1 | 2 | 3;
   /** Who the dare puts on the spot. */
-  target: 'player' | 'k' | 'both';
+  target: 'player' | 'k' | 'both' | 'npc';
   /** Read out by the chairman. */
   prompt: (s: GameState) => string;
   /** Extra gate beyond tier (e.g. she has to be here, or comfortable enough). */
@@ -31,6 +31,24 @@ const g = (s: GameState, who: 'player' | 'k'): Garments =>
 const kHere = (s: GameState) => s.scene!.vars.kSpotted === true;
 const meters = (s: GameState) => s.scene!.date?.meters ?? { interest: 0, comfort: 0, momentum: 0 };
 const loc = (s: GameState) => String(s.scene!.vars.loc ?? 'house');
+
+// The rest of the circle. Dares land on them too — most of the night is
+// watching other people answer the deck, which is the actual pleasure of the
+// game and gives the player room to breathe between their own turns.
+export const CIRCLE: Record<string, string[]> = {
+  house: ['Dex', 'the chairman', 'Bex', 'Gus', 'the guy asleep in the beanbag'],
+  frat: ['Tanner', 'the chairman', 'Gus', 'a pledge named Milo', 'Dex'],
+  pool: ['Priya', 'Dex', 'a man everyone calls Squid', 'the chairman'],
+  rooftop: ['Noor', 'Dex', 'the roof philosopher', 'the chairman'],
+};
+
+export function rollNpc(s: GameState, r: number): string {
+  const cast = CIRCLE[loc(s)] ?? CIRCLE.house;
+  return cast[Math.floor(r * cast.length) % cast.length];
+}
+
+/** Whoever the current dare landed on, when it isn't you or her. */
+const npc = (s: GameState) => String(s.scene!.vars.npc ?? 'the chairman');
 
 /** Table heat tier: base spice, pushed up by how far the game has already gone. */
 export function heatTier(s: GameState): 1 | 2 | 3 {
@@ -190,7 +208,66 @@ const DANCE: Dare[] = [
   },
 ];
 
-export const DARES: Dare[] = [...SILLY, ...STRIP, ...KISS, ...DANCE];
+// Dares that land on other people in the circle. You're the audience — but
+// the deck is the same deck, so the circle escalates alongside you.
+const NPC: Dare[] = [
+  {
+    id: 'npc-truth',
+    kind: 'silly',
+    tier: 1,
+    target: 'npc',
+    prompt: (s) =>
+      `the bottle stops on ${npc(s)}. The chairman draws: “Worst thing you’ve ever done at a party in this house.”`,
+  },
+  {
+    id: 'npc-silly',
+    kind: 'silly',
+    tier: 1,
+    target: 'npc',
+    prompt: (s) =>
+      `the bottle stops on ${npc(s)}. The chairman draws: “Text the fifth person in your recents, right now, the words ‘I know what you did.’ No context. No follow-up.”`,
+  },
+  {
+    id: 'npc-strip',
+    kind: 'strip',
+    tier: 2,
+    target: 'npc',
+    prompt: (s) => `the bottle stops on ${npc(s)}. The chairman draws: “Lose a layer.” No further comment is offered or needed.`,
+  },
+  {
+    id: 'npc-kiss',
+    kind: 'kiss',
+    tier: 2,
+    target: 'npc',
+    prompt: (s) =>
+      `the bottle stops on ${npc(s)}, and the second spin — the one that decides who — takes an agonizingly long time before landing on the chairman’s ex-wife, Bex, who has been quietly winning at this game all night.`,
+  },
+  {
+    id: 'npc-dance',
+    kind: 'dance',
+    tier: 2,
+    target: 'npc',
+    prompt: (s) => `the bottle stops on ${npc(s)}. The chairman draws: “Sixty seconds of interpretive dance. The circle picks the theme. The theme is ‘rent.’”`,
+  },
+  {
+    id: 'npc-assign',
+    kind: 'silly',
+    tier: 2,
+    target: 'npc',
+    prompt: (s) =>
+      `the bottle stops on ${npc(s)} — and the card is the one everyone dreads: “DEALER’S CHOICE. The person to the spinner’s left writes the dare.” The person to the left is you. Twelve faces turn.`,
+  },
+  {
+    id: 'npc-strip-hot',
+    kind: 'strip',
+    tier: 3,
+    target: 'npc',
+    prompt: (s) =>
+      `the bottle stops on ${npc(s)}, who has already lost more than anyone at this table and reacts to the card with the calm of a man beyond further loss: “Two layers. The deck apologizes for nothing.”`,
+  },
+];
+
+export const DARES: Dare[] = [...SILLY, ...STRIP, ...KISS, ...DANCE, ...NPC];
 export const DARE_BY_ID: Record<string, Dare> = Object.fromEntries(DARES.map((d) => [d.id, d]));
 
 /** Everything the table could legally throw at you right now. */

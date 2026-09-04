@@ -16,7 +16,7 @@
 
 import type { GameState, Scene, SceneNode } from '../engine/types';
 import { CALLBACK_LINES, MEMORY_FACTS } from './krystalle';
-import { DARE_BY_ID, bothBare, heatTier, rollDare } from './dares';
+import { DARE_BY_ID, bothBare, heatTier, rollDare, rollNpc } from './dares';
 import { count, describe, isBare, isStripped, outermost, type Garments } from './garments';
 
 // ---------------------------------------------------------------------------
@@ -53,8 +53,11 @@ const dareTarget = (s: GameState) => dare(s)?.target ?? 'player';
 const markDrawn = (s: GameState, r: number) => {
   const id = rollDare(s, r);
   const drawn = String(s.scene!.vars.drawn ?? '').split(',').filter(Boolean);
-  return { dare: id, drawn: [...drawn, id].join(',') };
+  // A second draw off the same value picks whose turn it is, when the card
+  // lands on someone other than you or her.
+  return { dare: id, npc: rollNpc(s, (r * 7.31) % 1), drawn: [...drawn, id].join(',') };
 };
+const npcName = (s: GameState) => String(s.scene!.vars.npc ?? 'the chairman');
 
 const NUMBER_JUDGE = (s: GameState) =>
   m(s).interest >= 52 && m(s).comfort >= 48 && m(s).momentum >= 30;
@@ -2470,6 +2473,57 @@ const NODES: Record<string, SceneNode> = {
         },
         addVars: { heat: 2 },
       },
+      // --- someone else's turn: you're the audience ---
+      {
+        text: 'Watch it happen. This is the good part of the game.',
+        cond: (s) => dareTarget(s) === 'npc' && dareId(s) !== 'npc-assign',
+        effects: { momentum: 4, mood: 3 },
+        goto: 'dareNpc',
+      },
+      {
+        text: 'Heckle. Ruthlessly, lovingly, at volume.',
+        cond: (s) => dareTarget(s) === 'npc' && dareId(s) !== 'npc-assign',
+        check: {
+          stat: 'charm',
+          label: 'Heckle the circle',
+          dc: 12,
+          onWin: 'dareHeckleWin',
+          onLose: 'dareHeckleFlat',
+          winEffects: { interest: 6, momentum: 10 },
+          winFlags: ['funny'],
+          loseEffects: { momentum: -4 },
+        },
+      },
+      {
+        text: 'Write them something gentle. They have suffered enough.',
+        cond: (s) => dareId(s) === 'npc-assign',
+        effects: { comfort: 6, interest: 4, mood: 4 },
+        flags: ['nice'],
+        goto: 'dareAssignKind',
+      },
+      {
+        text: 'Write them something devastating. The circle demands blood.',
+        cond: (s) => dareId(s) === 'npc-assign',
+        check: {
+          stat: 'intelligence',
+          label: 'Dealer’s choice',
+          dc: 12,
+          onWin: 'dareAssignEvil',
+          onLose: 'dareAssignBackfire',
+          winEffects: { interest: 8, momentum: 12 },
+          winFlags: ['funny', 'smart'],
+          loseEffects: { momentum: -6 },
+        },
+        addVars: { heat: 1 },
+      },
+      {
+        text: 'Turn the card on the circle: “Everyone. Same dare. Right now.”',
+        cond: (s) => dareId(s) === 'npc-assign',
+        effects: { momentum: 14, interest: 6, mood: 5 },
+        flags: ['confident'],
+        addVars: { heat: 1 },
+        goto: 'dareAssignAll',
+      },
       // --- universal refusal ---
       {
         text: 'Refuse. Overtime rules: a refusal costs a layer.',
@@ -2485,6 +2539,97 @@ const NODES: Record<string, SceneNode> = {
         goto: 'dareRefuseBroke',
       },
     ],
+  },
+
+  // ---- somebody else's turn ----
+  dareNpc: {
+    id: 'dareNpc',
+    text: (s) => {
+      const who = npcName(s);
+      const byId: Record<string, string> = {
+        'npc-truth': `${who} confesses something involving a fire extinguisher, a landlord, and a claim of self-defense. Two people in the circle already knew and had been sworn to secrecy. The chairman rules it “admissible and magnificent.”`,
+        'npc-silly': `${who} sends the text. Three seconds later the phone rings. ${who} declines it. The phone rings again. The circle chants for the speakerphone and does not get it, which is somehow more satisfying.`,
+        'npc-strip': `${who} loses the layer with the weary efficiency of someone who has been losing all night, and adds it to the pile without breaking eye contact with the chairman. The pile is now taller than the shoebox.`,
+        'npc-kiss': `${who} and Bex regard each other across two years of divorce and one bottle of physics. Then they shrug, at exactly the same time, and kiss like people settling a bet. The circle absolutely loses it. The chairman rules himself “fine, actually, thanks for asking.”`,
+        'npc-dance': `${who} performs sixty seconds of interpretive dance on the theme of rent. It is genuinely moving. Somebody films it. It ends with ${who} on the floor and the circle in respectful silence.`,
+        'npc-strip-hot': `${who} takes both layers in one motion, stands, and accepts the ovation like a man being knighted. He has been beyond embarrassment since round two and the circle has begun to find it inspiring.`,
+      };
+      return byId[dareId(s)] ?? `${who} answers the card, and the circle gets what it came for.`;
+    },
+    kLine: (s) =>
+      spotted(s)
+        ? dareId(s) === 'npc-kiss'
+          ? '“TWO YEARS,” she whispers, gripping your arm. “Two years and one bottle. I need to sit down. I am sitting down.”'
+          : dareId(s) === 'npc-dance'
+            ? '“That was about rent and I FELT it,” she says, wiping her eyes. “I’m calling my landlord.”'
+            : '“The deck is undefeated tonight,” she says, delighted, to no one in particular.'
+        : '',
+    mood: 'laughing',
+    next: 'dareDone',
+    nextLabel: 'The bottle resets',
+  },
+
+  dareHeckleWin: {
+    id: 'dareHeckleWin',
+    text: (s) =>
+      `You call the whole performance like a boxing commentator, and the circle abandons ${npcName(s)} entirely to laugh at your play-by-play instead. The chairman threatens to gavel you. The gavel is a shoe. The threat lands differently.` +
+      (spotted(s) ? ' Krystalle is contributing color commentary from your left, unprompted, in perfect rhythm with you.' : ''),
+    kLine: (s) => (spotted(s) ? '“—and he’s DOWN, folks, he’s down on the rug, the crowd is on its feet—”' : ''),
+    mood: 'laughing',
+    next: 'dareDone',
+    nextLabel: 'The bottle resets',
+  },
+
+  dareHeckleFlat: {
+    id: 'dareHeckleFlat',
+    text: (s) =>
+      `Your heckle arrives a half-second after the room's own punchline and dies in the open. ${npcName(s)} thanks you sincerely for the support, which is worse than anything the circle could have done.`,
+    next: 'dareDone',
+    nextLabel: 'The bottle resets',
+  },
+
+  dareAssignKind: {
+    id: 'dareAssignKind',
+    text: (s) =>
+      `You write “say the nicest true thing about the person on your left” and hand it back. The circle boos violently for four seconds and then goes completely quiet as ${npcName(s)} — visibly caught off guard — does it, and does it well. Somebody sniffles. The chairman declares an emergency intermission.` +
+      (spotted(s) ? ' Krystalle looks at you for a long moment over the top of her cup.' : ''),
+    kLine: (s) =>
+      spotted(s)
+        ? '“You had the whole circle in your hand and you used it to be kind to Gus.” She shakes her head slowly. “Do you know how annoying that is? That’s going in the file. Underlined.”'
+        : '',
+    mood: 'warm',
+    next: 'dareDone',
+    nextLabel: 'The bottle resets',
+  },
+
+  dareAssignEvil: {
+    id: 'dareAssignEvil',
+    text: (s) =>
+      `You write it, hand it back, and watch ${npcName(s)}'s face go through four distinct stages of grief in under two seconds. It is precisely calibrated: humiliating enough to be historic, survivable enough to be legal. The chairman reads it aloud twice because the first time the screaming drowned him out.`,
+    kLine: (s) => (spotted(s) ? '“That was EVIL. That was surgical. I’m frightened of you and I like it.”' : ''),
+    mood: 'laughing',
+    next: 'dareDone',
+    nextLabel: 'The bottle resets',
+  },
+
+  dareAssignBackfire: {
+    id: 'dareAssignBackfire',
+    text: (s) =>
+      `You reach for devastating and land on mean. The circle does the thing circles do — a beat of silence, then a boo with real teeth in it — and the chairman invokes the fairness doctrine: whoever writes it, does it. You do your own dare. It is not better the second time.`,
+    kLine: (s) => (spotted(s) ? '“Ohhh, he wrote his own obituary,” she says, not unkindly, watching you go.' : ''),
+    next: 'dareDone',
+    nextLabel: 'The bottle resets',
+  },
+
+  dareAssignAll: {
+    id: 'dareAssignAll',
+    text: (s) =>
+      'You turn the card on the entire circle — same dare, everyone, simultaneously — and the chairman is so structurally delighted by the move that he ratifies it before anyone can object. Twelve people do a stupid thing at the same time. It is the single best moment of the night and it belongs to all of them, which is exactly why it works.' +
+      (spotted(s) ? ' Krystalle, mid-dare, catches your eye across the circle with an expression that is doing several things at once.' : ''),
+    kLine: (s) => (spotted(s) ? '“Whole-circle play,” she says after, breathless. “Who ARE you tonight?”' : ''),
+    mood: 'laughing',
+    next: 'dareDone',
+    nextLabel: 'The bottle resets',
   },
 
   dareSilly: {
