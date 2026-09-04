@@ -45,6 +45,7 @@ export type Action =
   | { type: 'CLOSE_PHONE' }
   | { type: 'GO_ON_DATE' }
   | { type: 'GO_TO_PARTY' }
+  | { type: 'DEBUG_PARTY'; loc: string; spice?: number }
   | { type: 'CHOOSE'; index: number }
   | { type: 'CONTINUE' }
   | { type: 'CLEAR_TOASTS' };
@@ -422,7 +423,9 @@ function chooseInScene(s: GameState, index: number): GameState {
     const vars = { ...out.scene!.vars };
     for (const [k, v] of Object.entries(choice.setVars ?? {})) vars[k] = v;
     for (const [k, dv] of Object.entries(choice.addVars ?? {})) {
-      vars[k] = (typeof vars[k] === 'number' ? (vars[k] as number) : 0) + dv;
+      const next = (typeof vars[k] === 'number' ? (vars[k] as number) : 0) + dv;
+      // Spice is a 1-3 scale: risky dares can raise it, but it saturates.
+      vars[k] = k === 'spice' ? clamp(next, 1, 3) : next;
     }
     out = { ...out, scene: { ...out.scene!, vars } };
   }
@@ -604,6 +607,80 @@ function rollPartyInvite(s: GameState): GameState {
   };
 }
 
+
+// Build a party scene. Location is given; spice is location-weighted unless
+// overridden (debug). Krystalle's attendance is a roll, forced on in debug.
+function startParty(s: GameState, locId: string, spiceOverride?: number): GameState {
+  const out: GameState = { ...s, energy: clamp(s.energy - 12, 0, 100) };
+  const loc = PARTY_LOCATIONS[locId] ?? PARTY_LOCATIONS.house;
+
+  const rK = nextRand(out.seed);
+  const kChance = out.k.routeDead ? 0 : out.k.met ? 0.5 + out.k.enthusiasm * 0.05 : 0.4;
+  const kHere = isDebug() ? !out.k.routeDead : rK.value < kChance;
+
+  const rS = nextRand(rK.seed);
+  const [w1, w2] = loc.spiceWeights;
+  const spice = spiceOverride ?? (rS.value < w1 ? 1 : rS.value < w1 + w2 ? 2 : 3);
+
+  const rI = nextRand(rS.seed);
+  const intro = rI.value < 0.5 ? 0 : 1;
+
+  let seed = rI.seed;
+  const pool = [...loc.rooms];
+  const rooms: string[] = ['tod'];
+  while (rooms.length < 3) {
+    const r = nextRand(seed);
+    seed = r.seed;
+    rooms.push(pool.splice(Math.floor(r.value * pool.length), 1)[0]);
+  }
+
+  const dateNumber = kHere ? (out.k.hasNumber ? Math.max(1, out.k.datesCompleted) : 0) : null;
+  const date =
+    dateNumber === null
+      ? null
+      : {
+          venueId: 'party',
+          dateNumber,
+          meters: startMeters(out, dateNumber),
+          strikes: 0,
+          ladder: -1,
+          recentStrike: false,
+          recentKiss: false,
+          turn: 0,
+          lastRoll: null,
+          over: false,
+          outcome: null,
+        };
+
+  return {
+    ...out,
+    seed,
+    screen: 'scene',
+    scene: {
+      sceneId: 'party',
+      nodeId: 'arrive',
+      date,
+      cue: null,
+      vars: {
+        kHere,
+        kSpotted: false,
+        loc: loc.id,
+        spice,
+        baseSpice: spice,
+        intro,
+        rooms: rooms.join(','),
+        drinks: 0,
+        beats: 0,
+        heat: 0,
+      },
+      wardrobe: {
+        player: loc.playerOutfit ?? playerDefaultOutfit(out),
+        k: loc.kOutfit,
+      },
+    },
+  };
+}
+
 export function reducer(s: GameState, a: Action): GameState {
   switch (a.type) {
     case 'NEW_GAME':
@@ -685,81 +762,12 @@ export function reducer(s: GameState, a: Action): GameState {
     case 'GO_TO_PARTY': {
       const pp = s.pendingParty;
       if (!pp || pp.day !== s.day || pp.block !== s.block || s.scene) return s;
-      let out: GameState = {
-        ...s,
-        pendingParty: null,
-        energy: clamp(s.energy - 12, 0, 100),
-      };
-      const loc = PARTY_LOCATIONS[pp.loc] ?? PARTY_LOCATIONS.house;
-      // Is she here tonight? (Debug mode: always, unless the route is dead.)
-      const rK = nextRand(out.seed);
-      const kChance = out.k.routeDead
-        ? 0
-        : out.k.met
-          ? 0.5 + out.k.enthusiasm * 0.05
-          : 0.4;
-      const kHere = isDebug() ? !out.k.routeDead : rK.value < kChance;
-      // Party personality: spice level (location-weighted), an intro variant,
-      // and two rolled event rooms — plus the truth-or-dare circle, always.
-      const rS = nextRand(rK.seed);
-      const [w1, w2] = loc.spiceWeights;
-      const spice = rS.value < w1 ? 1 : rS.value < w1 + w2 ? 2 : 3;
-      const rI = nextRand(rS.seed);
-      const intro = rI.value < 0.5 ? 0 : 1;
-      let seed = rI.seed;
-      const pool = [...loc.rooms];
-      const rooms: string[] = ['tod'];
-      while (rooms.length < 3) {
-        const r = nextRand(seed);
-        seed = r.seed;
-        rooms.push(pool.splice(Math.floor(r.value * pool.length), 1)[0]);
-      }
-      const dateNumber = kHere
-        ? out.k.hasNumber
-          ? Math.max(1, out.k.datesCompleted)
-          : 0
-        : null;
-      const date =
-        dateNumber === null
-          ? null
-          : {
-              venueId: 'party',
-              dateNumber,
-              meters: startMeters(out, dateNumber),
-              strikes: 0,
-              ladder: -1,
-              recentStrike: false,
-              recentKiss: false,
-              turn: 0,
-              lastRoll: null,
-              over: false,
-              outcome: null,
-            };
-      return {
-        ...out,
-        seed,
-        screen: 'scene',
-        scene: {
-          sceneId: 'party',
-          nodeId: 'arrive',
-          date,
-          cue: null,
-          vars: {
-            kHere,
-            kSpotted: false,
-            loc: loc.id,
-            spice,
-            intro,
-            rooms: rooms.join(','),
-            drinks: 0,
-            beats: 0,
-          },
-          wardrobe: {
-            player: loc.playerOutfit ?? playerDefaultOutfit(out),
-            k: loc.kOutfit,
-          },
-        },
-      };
+      return startParty({ ...s, pendingParty: null }, pp.loc);
+    }
+    case 'DEBUG_PARTY': {
+      // Playtest tool: drop straight into a party of your choosing.
+      if (s.scene || s.gameOver) return s;
+      return startParty({ ...s, pendingParty: null }, a.loc, a.spice);
     }
     case 'CHOOSE':
       return chooseInScene(s, a.index);

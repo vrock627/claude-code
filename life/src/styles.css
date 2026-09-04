@@ -401,6 +401,46 @@ button {
   40% { transform: translateY(-4px); }
 }
 
+.debug-spawn {
+  border-color: rgba(111, 208, 140, 0.35);
+}
+
+.debug-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.debug-loc {
+  flex: 1 1 190px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.debug-btn {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 0.72rem;
+  color: #9fd8b0;
+}
+
+.debug-btn:hover {
+  border-color: var(--green);
+}
+
+.debug-btn.spice-2 {
+  color: var(--accent2);
+}
+
+.debug-btn.spice-3 {
+  color: var(--pink);
+}
+
 .debug-panel {
   display: flex;
   flex-wrap: wrap;

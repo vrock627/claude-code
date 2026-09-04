@@ -2018,10 +2018,445 @@ const NODES: Record<string, SceneNode> = {
   },
   todEnd: {
     id: 'todEnd',
-    text: 'The chairman adjourns the circle with a gavel that is a shoe. Members disperse into the party carrying new secrets, minor injuries, and the specific closeness of people who have howled together.',
+    text: (s) =>
+      sp(s) >= 2
+        ? 'The chairman reaches for the shoe-gavel — and the circle revolts. “OVERTIME,” someone says, and it catches like a struck match. Nobody is leaving. The bottle is already being repositioned with ceremony.'
+        : 'The chairman adjourns the circle with a gavel that is a shoe. Members disperse into the party carrying new secrets, minor injuries, and the specific closeness of people who have howled together.',
+    choices: [
+      {
+        text: 'Stay for overtime. The circle is voting on new rules.',
+        cond: (s) => sp(s) >= 2,
+        goto: 'todOT1',
+      },
+      {
+        text: 'Back into the night.',
+        setVars: { done_tod: true },
+        addVars: { beats: 1 },
+        goto: 'flow',
+      },
+    ],
+  },
+
+  // ======================================================== OVERTIME
+  // The game gets a second life and a rules amendment. Risky dares here raise
+  // the party's spice for the rest of the night — which unlocks hotter rooms
+  // later (the hot tub at 2, the midnight plunge at 3).
+  todOT1: {
+    id: 'todOT1',
+    text: (s) =>
+      'The chairman stands on a chair to read the amendment: “Overtime rules. One: refusing a dare costs a layer. Two: shoes count as a layer, jewelry does not — Krystalle, I saw that. Three: the circle can raise any dare by majority, and the circle is feeling generous.” It passes unanimously, including the votes of two people who are asleep.' +
+      (spotted(s)
+        ? ' Krystalle kicks off both sandals immediately — pre-paying, strategic, entirely unbothered — and raises an eyebrow at you across the bottle.'
+        : ''),
+    kLine: (s) => (spotted(s) ? '“Two layers banked. I came prepared. Did you?”' : ''),
+    choices: [
+      {
+        text: 'Take the first overtime dare, whatever it is. Sight unseen.',
+        check: {
+          stat: 'charm',
+          label: 'Blind dare',
+          dc: 13,
+          onWin: 'todOT1Win',
+          onLose: 'todOT1Lose',
+          winEffects: { interest: 8, momentum: 12, mood: 5 },
+          winFlags: ['confident'],
+          loseEffects: { momentum: -3 },
+        },
+        addVars: { spice: 1, heat: 1 },
+      },
+      {
+        text: 'Amend the amendment: “Whoever assigns a dare has to do it too.”',
+        check: {
+          stat: 'intelligence',
+          label: 'The rules lawyer',
+          dc: 12,
+          onWin: 'todOT1Rule',
+          onLose: 'todOT1RuleFail',
+          winEffects: { interest: 6, momentum: 8 },
+          winFlags: ['smart', 'funny'],
+          loseEffects: { momentum: -5 },
+        },
+        addVars: { heat: 1 },
+      },
+      {
+        text: 'Bow out while fully dressed. Dignity is a finite resource.',
+        effects: { momentum: -4 },
+        goto: 'todOTBow',
+      },
+    ],
+  },
+  todOT1Win: {
+    id: 'todOT1Win',
+    text: (s) => {
+      const d: Record<string, string> = {
+        pool: 'The blind dare: “Deliver a heartfelt eulogy for the inflatable flamingo. It has passed. It passed forty minutes ago and nobody said anything.” You deliver twelve minutes of eulogy. Two people actually cry. The flamingo is committed to the deep end.',
+        frat: 'The blind dare: “Sit in the recruitment chair and answer three questions as if you are rushing.” You commit so completely that Tanner offers you a legacy bid and someone starts a chant with your name in it.',
+        rooftop: 'The blind dare: “Narrate the street below for two minutes as a nature documentary.” You do it in the voice, and the rooftop goes dead silent to listen. “The male, having circled twice, approaches the taco cart. He has no plan.”',
+        house: 'The blind dare: “Take a phone call from the next person who calls anyone here, as that person.” You field a wrong-number telemarketer as a grieving Victorian widow. The circle is destroyed.',
+      };
+      return (
+        d[L(s)] +
+        (spotted(s)
+          ? ' Krystalle has both hands flat on the floor, laughing so hard she is silent, which is somehow the loudest reaction in the room.'
+          : '')
+      );
+    },
+    kLine: (s) => (spotted(s) ? '“Sight unseen! He took it SIGHT UNSEEN!” she wheezes to nobody. “I need a minute.”' : ''),
+    mood: 'laughing',
+    next: 'todOT2',
+    nextLabel: 'The circle wants more',
+  },
+  todOT1Lose: {
+    id: 'todOT1Lose',
+    text: (s) =>
+      spotted(s)
+        ? 'The blind dare turns out to be “swap an item of clothing with the chairman, permanently.” The chairman is wearing a mesh tank top and no shame. You surrender your shirt to the office and receive the mesh. It fits like a rumor. Krystalle bites down on her cup to keep from making a sound and fails completely.'
+        : 'The blind dare turns out to be “swap an item of clothing with the chairman, permanently.” You surrender your shirt and receive a mesh tank top that fits like a rumor. The circle salutes the transaction.',
+    kLine: (s) => (spotted(s) ? '“It’s— no, it’s working. It’s a LOOK. I hate that it’s a look.”' : ''),
+    choices: [
+      {
+        text: 'Wear the mesh. Wear it like it was tailored.',
+        setOutfit: { player: 'p-mesh' },
+        effects: { momentum: 6, interest: 4 },
+        flags: ['funny'],
+        goto: 'todOT2',
+      },
+    ],
+  },
+  todOT1Rule: {
+    id: 'todOT1Rule',
+    text: 'Your amendment passes by acclaim and immediately reshapes the game: dares get creative instead of cruel, because everyone assigning one has to survive it too. The chairman calls it “the fairness doctrine” and is visibly annoyed he didn’t think of it.',
+    next: 'todOT2',
+    nextLabel: 'Legislate on',
+  },
+  todOT1RuleFail: {
+    id: 'todOT1RuleFail',
+    text: 'The circle hears “rules lawyer” and reacts the way circles do: your amendment is tabled, then repealed, then used against you. The chairman rules that you now go twice in overtime. Precedent is a cruel mistress.',
+    next: 'todOT2',
+    nextLabel: 'Go twice, then',
+  },
+
+  // ---- overtime round 2: kiss roulette ----
+  todOT2: {
+    id: 'todOT2',
+    text: (s) =>
+      'The chairman produces a second bottle — “the good bottle” — and announces the format shift with the gravity of a man declaring war: “Kiss roulette. Bottle picks two. Two get seven minutes in the pantry. The bottle does not negotiate and neither do I.”' +
+      (spotted(s)
+        ? ' Krystalle does not look at you. Krystalle looks at everything in the room except you, with tremendous specificity.'
+        : ' Half the circle immediately develops urgent business elsewhere; the half that stays is the half that came for this.'),
+    kLine: (s) => (spotted(s) ? '“I want it on the record that I have a shift at seven.” A beat. She still hasn’t looked at you. “Spin it.”' : ''),
+    choices: [
+      {
+        text: 'Spin. Let the bottle decide.',
+        judge: {
+          pass: (s) => spotted(s) && m(s).comfort >= 55 && m(s).interest >= 50,
+          onPass: 'todOT2K',
+          onFail: 'todOT2Miss',
+        },
+        addVars: { spice: 1, heat: 1 },
+      },
+      {
+        text: 'Rig the spin. Badly, obviously, so everyone sees you do it.',
+        cond: (s) => spotted(s),
+        check: {
+          stat: 'charm',
+          label: 'The world’s most transparent cheat',
+          dc: 13,
+          onWin: 'todOT2Rig',
+          onLose: 'todOT2RigFail',
+          winEffects: { interest: 10, momentum: 12 },
+          winFlags: ['funny', 'confident'],
+          loseEffects: { comfort: -8, interest: -5 },
+          loseFlags: ['tryhard'],
+        },
+        addVars: { spice: 1, heat: 1 },
+      },
+      {
+        text: 'Kill the format before it starts — “pantry’s a hard pass, spin for dares instead.”',
+        effects: { comfort: 8, momentum: -4 },
+        flags: ['gentleman'],
+        goto: 'todOT2Veto',
+      },
+    ],
+  },
+  todOT2K: {
+    id: 'todOT2K',
+    text: 'The bottle takes its time. It slows past the chairman, past a man asleep in a beanbag, and stops — with the mechanical indifference of physics — pointing at Krystalle. The second spin is a formality that everyone watches anyway. It picks you. The circle makes a sound usually reserved for last-second field goals, and the pantry door is opened for you both like a limousine.',
+    kLine: '“Seven minutes,” she says, standing, to the room. “Timed. Audibly. If anyone knocks I’m taking a hostage.”',
+    mood: 'flushed',
+    choices: [
+      {
+        text: 'Go in. Close the door. See what she does with the silence.',
+        move: 'makeOut',
+        moveWin: 'todPantry',
+        moveLose: 'todPantryTalk',
+        addVars: { heat: 1 },
+      },
+      {
+        text: 'Go in — and make it clear the door can stay open if she wants it open.',
+        effects: { comfort: 12, interest: 6 },
+        flags: ['gentleman'],
+        goto: 'todPantryTalk',
+      },
+    ],
+  },
+  todPantry: {
+    id: 'todPantry',
+    text: 'The pantry is four feet of shelving, one bare bulb, and about nine hundred cans of soup. The door shuts. The party goes muffled and stupid on the other side of it, and she stops pretending she wasn’t going to — her hands find your collar, your back finds the shelf, and something canned hits the floor and rolls, and neither of you goes after it. She kisses like she argues: fast, sure, and with a punchline waiting. Somewhere out there the circle is counting down and getting it wrong on purpose.',
+    kLine: 'At about minute five, breathless, laughing against your mouth: “The soup situation in here is UNHINGED. Also I’ve been thinking about this since the café. Also don’t stop.”',
+    mood: 'flushed',
+    choices: [
+      {
+        text: 'Use the last two minutes on the thing you actually want to say.',
+        effects: { comfort: 10, interest: 8 },
+        flags: ['nice'],
+        goto: 'todPantryOut',
+      },
+      {
+        text: 'Use the last two minutes exactly as issued.',
+        effects: { interest: 8, momentum: 10 },
+        flags: ['sexy'],
+        goto: 'todPantryOut',
+      },
+    ],
+  },
+  todPantryTalk: {
+    id: 'todPantryTalk',
+    text: 'The door shuts and she immediately sits down on an upturned crate, pats the one beside it, and hands you a can of chickpeas like a peace offering. “Seven minutes of pantry, on OUR terms,” she says. And that’s what it is: seven minutes of talking in a soup closet, low and easy, her shoulder against yours, the party a rumor through the door. When the chairman bangs on it at six-thirty she yells “WE ARE HAVING A CONVERSATION” with such genuine outrage that the circle applauds.',
+    kLine: '“For the record,” she says, at the door, before opening it, “that was better than the alternative. Not because the alternative is bad. Because you didn’t assume.”',
+    mood: 'warm',
+    next: 'todPantryOut',
+    nextLabel: 'Open the door',
+  },
+  todPantryOut: {
+    id: 'todPantryOut',
+    text: (s) =>
+      'You come out to a standing ovation, a scoring card held up by the man from the beanbag (7.5, harsh), and a chairman demanding testimony neither of you provides.' +
+      (shirtless(s) ? ' The mesh tank top has, at some point, become part of the legend.' : ''),
+    kLine: '“No comment,” she tells the circle, sitting back down with the serenity of a woman who will absolutely be commenting later.',
+    next: 'todOT3',
+    nextLabel: 'The bottle wants a finale',
+  },
+  todOT2Miss: {
+    id: 'todOT2Miss',
+    text: (s) =>
+      spotted(s)
+        ? 'The bottle stops on the chairman and a woman named Bex who have, it emerges, been divorced for two years. The pantry door closes on the most fascinating seven minutes in the building’s history. Krystalle grabs your arm at the wrist, hard, and whispers the entire backstory into your ear at maximum speed, and you realize you are being trusted with something better than the pantry.'
+        : 'The bottle stops on the chairman and a woman named Bex who have, it emerges, been divorced for two years. The pantry door closes on the most fascinating seven minutes in the building’s history. The circle waits like it’s a moon landing.',
+    kLine: (s) => (spotted(s) ? '“TWO YEARS. And he KEPT the shoebox in the divorce. I need you to understand the stakes here.”' : ''),
+    next: 'todOT3',
+    nextLabel: 'Seven minutes pass. Nobody breathes.',
+  },
+  todOT2Rig: {
+    id: 'todOT2Rig',
+    text: 'You stop the bottle with your foot. Openly. Slowly. While maintaining eye contact with the chairman. The circle loses its collective mind at the sheer nerve of it, and Krystalle — who has stopped pretending not to look at you — puts her face in her hands and laughs until she has to lie down on the rug.',
+    kLine: '“HE USED HIS FOOT. In front of the chairman! In front of GOD!” From the floor, quieter, when the noise moves on: “…Do it again next round.”',
+    mood: 'laughing',
+    choices: [
+      {
+        text: 'Cash the moment in — offer her the pantry, on the record, her call.',
+        judge: {
+          pass: (s) => m(s).comfort >= 50,
+          onPass: 'todOT2K',
+          onFail: 'todOT2RigWait',
+        },
+      },
+      {
+        text: 'Leave it as a bit. The nerve was the whole point.',
+        effects: { interest: 6, momentum: 8 },
+        goto: 'todOT3',
+      },
+    ],
+  },
+  todOT2RigWait: {
+    id: 'todOT2RigWait',
+    text: 'She hears the offer, and you can watch her enjoy it and decline it in the same second — a hand flat on her chest, mock-scandalized, an answer with no sting in it at all.',
+    kLine: '“In a PANTRY? Sir. I’m a professional. Ask me again somewhere with fewer legumes.”',
+    next: 'todOT3',
+    nextLabel: 'Fewer legumes. Noted.',
+  },
+  todOT2RigFail: {
+    id: 'todOT2RigFail',
+    text: 'You go for the foot-stop and the bottle skitters off the rug, under the couch, into the structural past of the house. The chairman rules it “tampering.” The circle rules it “desperate.” Krystalle laughs, but it’s the laugh you get for effort, and she doesn’t offer to help look for the bottle.',
+    next: 'todOT3',
+    nextLabel: 'Retrieve your bottle and your dignity',
+  },
+  todOT2Veto: {
+    id: 'todOT2Veto',
+    text: (s) =>
+      spotted(s)
+        ? 'You kill the format in one sentence, no lecture attached — “pantry’s a hard pass, spin for dares instead” — and the circle grumbles and complies, because you offered it something to do instead of just taking something away. Krystalle doesn’t say anything about it. She just moves to sit next to you instead of across from you.'
+        : 'You kill the format in one sentence and offer a replacement in the same breath, which is the only way circles ever accept a veto. Dares it is. The chairman reshuffles the shoebox with wounded dignity.',
+    kLine: (s) => (spotted(s) ? '“Dare format. Much better,” she says, arriving at your shoulder. “The pantry smells like feet. Ask anyone who’s been in it.”' : ''),
+    mood: 'warm',
+    next: 'todOT3',
+    nextLabel: 'On with the game',
+  },
+
+  // ---- overtime round 3: the finale, scaled to how hot it got ----
+  todOT3: {
+    id: 'todOT3',
+    text: (s) => {
+      const hot = sp(s) >= 3;
+      if (!hot)
+        return 'The circle has burned through its material. What’s left is the good part: the chairman reads the last card in the shoebox — “Everyone says one true thing about someone else in this circle. Then we stop.” — and the game ends the way the best ones do, in a lap of unguarded compliments and one guy sincerely thanking a beanbag.';
+      const d: Record<string, string> = {
+        pool: 'Final card, and the chairman reads it twice to be sure: “The circle enters the water. Everything you’re wearing stays on the deck.” Priya, from a lounger, without opening her eyes: “Pool lights are already off, children.”',
+        frat: 'Final card. The chairman reads it standing: “Last one dressed buys breakfast for the house. Timer starts now.” Somewhere behind you, a man is already removing a sock with tactical efficiency.',
+        rooftop: 'Final card, and the chairman’s voice drops out of showmanship into something real: “Everyone takes off exactly one thing they’ve been hiding behind tonight. Interpret that however you want. The skyline is watching and it doesn’t care.”',
+        house: 'Final card: “Layers on the lamp, truths on the table. One of each, everybody, at the same time.” The lamp already has three shirts on it. The lamp is doing great.',
+      };
+      return (
+        d[L(s)] +
+        (spotted(s)
+          ? ' Krystalle reads the room, then reads you, and the decision she comes to is visible from where you’re sitting.'
+          : '')
+      );
+    },
+    choices: [
+      {
+        text: 'Over the edge with them. Everything on the deck, like the card says.',
+        cond: (s) => sp(s) >= 3 && L(s) === 'pool',
+        setOutfit: { player: 'p-towel' },
+        effects: { interest: 8, momentum: 12, mood: 6 },
+        flags: ['confident', 'sexy'],
+        addVars: { spice: 1, heat: 1 },
+        goto: 'todOT3In',
+      },
+      {
+        text: 'Beat the timer. Denim is a liability and breakfast for eleven is real money.',
+        cond: (s) => sp(s) >= 3 && L(s) === 'frat',
+        setOutfit: { player: 'p-boxers' },
+        effects: { interest: 8, momentum: 12, mood: 6 },
+        flags: ['confident', 'funny'],
+        addVars: { spice: 1, heat: 1 },
+        goto: 'todOT3In',
+      },
+      {
+        text: 'Shirt on the lamp, truth on the table. Both at once, like the card says.',
+        cond: (s) => sp(s) >= 3 && L(s) === 'house',
+        setOutfit: { player: 'p-shirtless' },
+        effects: { interest: 8, momentum: 12, mood: 6 },
+        flags: ['confident', 'nice'],
+        addVars: { spice: 1, heat: 1 },
+        goto: 'todOT3In',
+      },
+      {
+        text: 'Take off the thing you’ve been hiding behind. Say it to the skyline.',
+        cond: (s) => sp(s) >= 3 && L(s) === 'rooftop',
+        effects: { interest: 8, comfort: 6, momentum: 8, mood: 6 },
+        flags: ['confident', 'nice'],
+        addVars: { spice: 1, heat: 1 },
+        goto: 'todOT3In',
+      },
+      {
+        text: 'In — but check with her first, one look, one raised eyebrow, her call.',
+        cond: (s) => sp(s) >= 3 && spotted(s),
+        judge: {
+          pass: (s) => m(s).comfort >= 60 && m(s).interest >= 55,
+          onPass: 'todOT3Together',
+          onFail: 'todOT3HerNo',
+        },
+        setOutfit: { player: 'p-towel' },
+        addVars: { heat: 1 },
+      },
+      {
+        text: 'Out. Loudly, cheerfully, with a bad excuse nobody believes.',
+        cond: (s) => sp(s) >= 3,
+        effects: { momentum: -2, mood: 3 },
+        flags: ['funny'],
+        goto: 'todOT3Out',
+      },
+      {
+        text: 'Say your true thing, and mean it.',
+        cond: (s) => sp(s) < 3,
+        effects: { comfort: 8, interest: 6, mood: 5 },
+        flags: ['nice'],
+        goto: 'todOT3True',
+      },
+    ],
+  },
+  todOT3In: {
+    id: 'todOT3In',
+    text: (s) => {
+      const d: Record<string, string> = {
+        pool: 'The circle goes over the edge in a single ragged wave — clothes on the deck, the pool black and warm as blood heat, everyone hollering at the shock of it. Below the surface nobody can see anything and above it everyone is just a head and a laugh in the dark. It is, unexpectedly, the least self-conscious ten minutes of the entire night.',
+        frat: 'The timer starts and the living room becomes a war zone of flying denim. You finish second-to-last on purpose, because the man who wins this is buying breakfast for nobody and the man who loses is buying for eleven. Down to boxers, you have never felt more strategically brilliant.',
+        rooftop: 'You take off the jacket you’ve been hiding behind and say the thing under it out loud, to a rooftop full of strangers and one string of lights. Somebody squeezes your shoulder on the way past. The skyline, as promised, does not care, and that is exactly why it works.',
+        house: 'A shirt goes on the lamp; a truth goes on the table. The lamp is now more clothing than lamp, and the table has heard things tonight that will outlive this house.',
+      };
+      return (
+        d[L(s)] +
+        (spotted(s)
+          ? ' And Krystalle is right there in it with the rest of them, because of course she is — she made her own call the second the card was read, the same way she does everything.'
+          : '')
+      );
+    },
+    kLine: (s) =>
+      spotted(s)
+        ? '“We are NEVER speaking of this,” she announces to the whole circle, delighted, definitely lying.'
+        : '',
+    mood: 'laughing',
+    next: 'todOTEnd',
+    nextLabel: 'The circle, unclothed and unbothered',
+  },
+  todOT3Together: {
+    id: 'todOT3Together',
+    text: (s) =>
+      L(s) === 'pool'
+        ? 'You look at her. One eyebrow, a question with no pressure in it. She holds your eyes for a beat, and then she’s laughing and pulling you by the wrist toward the deep end, away from the main splash — the two of you going in on your own terms, at your own end of the pool, while the circle detonates behind you. The water is black and warm and hers is the only laugh you’re tracking in it.'
+        : 'You look at her. One eyebrow, a question with no pressure in it. She answers it by grabbing your wrist and standing up with you — matching your move, matching your pace, the two of you taking the dare together while the circle loses its mind. Whatever the card said, this is now a two-person operation and everybody can see it.',
+    kLine: '“You asked,” she says, close, over the noise. “With your face, but you asked. That’s the whole reason this is happening, superstar.”',
+    mood: 'flushed',
+    next: 'todOTEnd',
+    nextLabel: 'Together, then',
+  },
+  todOT3HerNo: {
+    id: 'todOT3HerNo',
+    text: 'You look at her. She catches it, understands it, and answers with a small headshake and a smile that takes every ounce of sting out of it — then, before you can decide what to do with your own dare, she stands up and announces she’s on towel duty, which reframes both of your exits as a joint executive decision.',
+    kLine: '“We’re management,” she tells the circle. “Management observes.”',
+    mood: 'warm',
+    next: 'todOTEnd',
+    nextLabel: 'Management observes',
+  },
+  todOT3Out: {
+    id: 'todOT3Out',
+    text: 'You bow out with an excuse so transparent the circle awards it points for artistry — something about a rash, a cousin, and a scheduling conflict. The chairman grants a dispensation. You watch eleven people commit fully to a terrible idea and enjoy every second of it from the safety of the couch.',
+    next: 'todOTEnd',
+    nextLabel: 'Spectate, guiltlessly',
+  },
+  todOT3True: {
+    id: 'todOT3True',
+    text: (s) =>
+      spotted(s)
+        ? 'You say your true thing about someone in the circle, and you don’t make it about Krystalle, because the whole room is waiting for you to and the restraint is worth more. She notices. Of course she notices. Her true thing, three people later, is about a friend she has known since nursing school, and she delivers it with her voice doing something unsteady at the end.'
+        : 'You say your true thing and mean it, and the circle passes the honesty around like a bowl until it comes back empty. The guy thanking the beanbag turns out to have the best one.',
+    mood: 'warm',
+    next: 'todOTEnd',
+    nextLabel: 'Sit in it a second',
+  },
+  todOTEnd: {
+    id: 'todOTEnd',
+    text: (s) =>
+      'The chairman finally adjourns overtime with the shoe-gavel, three hours after he first tried. The circle dissolves into the party — some of it damp, some of it underdressed, all of it fused into the specific brotherhood of people who went too far together and enjoyed it.' +
+      (sp(s) >= 3
+        ? ' The party the circle rejoins is not the party it left. Whatever the night was going to be, it is now something several degrees warmer.'
+        : ''),
     choices: [
       {
         text: 'Back into the night.',
+        setVars: { done_tod: true },
+        addVars: { beats: 1 },
+        goto: 'flow',
+      },
+    ],
+  },
+  todOTBow: {
+    id: 'todOTBow',
+    text: 'You exit before the amendment can find you, to a chorus of boos so warm it might as well be applause. The chairman marks your departure “honorable, cowardly, and correct” in the official record, which is a napkin.',
+    choices: [
+      {
+        text: 'Back into the night, fully clothed.',
         setVars: { done_tod: true },
         addVars: { beats: 1 },
         goto: 'flow',

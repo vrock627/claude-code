@@ -50,8 +50,14 @@ export function SceneView({ s, dispatch }: { s: GameState; dispatch: Dispatch<Ac
           <span>ladder <b>{d.ladder >= 0 ? LADDER[d.ladder] : '—'}</b></span>
           <span>date# <b>{d.dateNumber}</b></span>
           {s.scene.vars.spice !== undefined && (
-            <span>spice <b>{String(s.scene.vars.spice)}</b></span>
+            <span>
+              spice <b>{String(s.scene.vars.spice)}</b>
+              {s.scene.vars.baseSpice !== undefined &&
+                s.scene.vars.spice !== s.scene.vars.baseSpice &&
+                ` (from ${String(s.scene.vars.baseSpice)})`}
+            </span>
           )}
+          {s.scene.vars.heat !== undefined && <span>heat <b>{String(s.scene.vars.heat)}</b></span>}
           {s.scene.vars.kHere !== undefined && (
             <span>K {s.scene.vars.kHere ? (s.scene.vars.kSpotted ? 'spotted' : 'here, unspotted') : 'absent'}</span>
           )}

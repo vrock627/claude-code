@@ -367,6 +367,61 @@ describe('reducer end-to-end', () => {
     expect(at({ loc: 'pool', spice: 3, beats: 3, done_dip: true })).toBe(false);
   });
 
+  it('DEBUG_PARTY spawns the chosen location at the chosen spice', () => {
+    let s = reducer(initialState(5), { type: 'NEW_GAME', seed: 5 });
+    s = reducer(s, { type: 'DEBUG_PARTY', loc: 'frat', spice: 3 });
+    expect(s.scene?.sceneId).toBe('party');
+    expect(s.scene?.vars.loc).toBe('frat');
+    expect(s.scene?.vars.spice).toBe(3);
+    expect(s.scene?.vars.baseSpice).toBe(3);
+    expect(String(s.scene?.vars.rooms).split(',')).toContain('tod');
+    // pool parties put you in swimwear
+    let p = reducer(initialState(5), { type: 'NEW_GAME', seed: 5 });
+    p = reducer(p, { type: 'DEBUG_PARTY', loc: 'pool', spice: 1 });
+    expect(p.scene?.wardrobe.player).toBe('p-swim');
+    expect(p.scene?.vars.spice).toBe(1);
+  });
+
+  it('risky dares raise party spice, saturating at 3', () => {
+    let s = reducer(initialState(5), { type: 'NEW_GAME', seed: 5 });
+    s = reducer(s, { type: 'DEBUG_PARTY', loc: 'house', spice: 2 });
+    const bump = (st: GameState) => ({
+      ...st,
+      scene: { ...st.scene!, nodeId: 'todOT1', vars: { ...st.scene!.vars } },
+    });
+    // The blind-dare choice carries addVars { spice: 1, heat: 1 }
+    s = reducer(bump(s), { type: 'CHOOSE', index: 0 });
+    expect(s.scene!.vars.spice).toBe(3);
+    expect(s.scene!.vars.heat).toBe(1);
+    // Further risky dares cannot push spice past 3
+    s = reducer(bump(s), { type: 'CHOOSE', index: 0 });
+    expect(s.scene!.vars.spice).toBe(3);
+    expect(s.scene!.vars.heat).toBe(2);
+  });
+
+  it('overtime only opens at spice 2+, and escalation unlocks hotter rooms', () => {
+    let s = reducer(initialState(5), { type: 'NEW_GAME', seed: 5 });
+    s = reducer(s, { type: 'DEBUG_PARTY', loc: 'pool', spice: 1 });
+    const otAt = (spice: number) => {
+      const st = {
+        ...s,
+        scene: { ...s.scene!, nodeId: 'todEnd', vars: { ...s.scene!.vars, spice } },
+      };
+      return visibleChoices(st, currentNode(st)!).some((c) => c.text.startsWith('Stay for overtime'));
+    };
+    expect(otAt(1)).toBe(false);
+    expect(otAt(2)).toBe(true);
+    expect(otAt(3)).toBe(true);
+    // A party that starts mild but heats up to 3 unlocks the midnight plunge.
+    const late = {
+      ...s,
+      scene: { ...s.scene!, nodeId: 'flow', vars: { ...s.scene!.vars, spice: 3, beats: 3 } },
+    };
+    expect(
+      visibleChoices(late, currentNode(late)!).some((c) => c.text.startsWith('Midnight.'))
+    ).toBe(true);
+  });
+
   it('a full scripted date can run through the reducer', () => {
     let s = reducer(initialState(11), { type: 'NEW_GAME', seed: 11 });
     s = {

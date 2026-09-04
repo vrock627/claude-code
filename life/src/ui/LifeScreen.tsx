@@ -7,9 +7,11 @@ import {
   CAR_TIERS,
   DATE_VENUES,
   HOME_TIERS,
+  PARTY_LOCATIONS,
   WARDROBE_TIERS,
   JOB_TIERS,
 } from '../content/lifeContent';
+import { isDebug } from '../engine/debug';
 import { MEMORY_FACTS } from '../content/krystalle';
 
 export function LifeScreen({ s, dispatch }: { s: GameState; dispatch: Dispatch<Action> }) {
@@ -92,6 +94,36 @@ export function LifeScreen({ s, dispatch }: { s: GameState; dispatch: Dispatch<A
           </details>
         )}
       </section>
+
+      {isDebug() && (
+        <section className="panel debug-spawn">
+          <h3>🐞 Debug — spawn a party</h3>
+          <p className="muted">
+            Krystalle attends every party in debug mode. Pick a venue and spice level to drop
+            straight in.
+          </p>
+          {Object.values(PARTY_LOCATIONS).map((loc) => (
+            <div key={loc.id} className="debug-row">
+              <span className="debug-loc">{loc.name}</span>
+              {[1, 2, 3].map((spice) => (
+                <button
+                  key={spice}
+                  className={`debug-btn spice-${spice}`}
+                  onClick={() => dispatch({ type: 'DEBUG_PARTY', loc: loc.id, spice })}
+                >
+                  spice {spice}
+                </button>
+              ))}
+              <button
+                className="debug-btn"
+                onClick={() => dispatch({ type: 'DEBUG_PARTY', loc: loc.id })}
+              >
+                roll
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="panel">
         <h3>Upgrades</h3>
