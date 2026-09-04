@@ -26,6 +26,8 @@ import {
   ENCOUNTER_SCENES,
   HOME_TIERS,
   JOB_TIERS,
+  PARTY_INVITE_CHANCE,
+  PARTY_ROOMS,
   WARDROBE_TIERS,
 } from '../content/lifeContent';
 import { SCENES } from '../content/scenes';
@@ -39,6 +41,7 @@ export type Action =
   | { type: 'OPEN_PHONE' }
   | { type: 'CLOSE_PHONE' }
   | { type: 'GO_ON_DATE' }
+  | { type: 'GO_TO_PARTY' }
   | { type: 'CHOOSE'; index: number }
   | { type: 'CONTINUE' }
   | { type: 'CLEAR_TOASTS' };
@@ -51,12 +54,13 @@ export function initialState(seed: number = Date.now() >>> 0): GameState {
     money: 220,
     energy: 80,
     mood: 60,
-    stats: { charm: 2, style: 1, fitness: 2 },
+    stats: { charm: 2, style: 1, fitness: 2, intelligence: 2 },
     homeTier: 0,
     carTier: 0,
     wardrobeTier: 0,
     job: { tier: 0, performance: 40, warnings: 0, shiftsWorked: 0, fired: false },
     rentMissed: 0,
+    pendingParty: null,
     k: {
       met: false,
       hasNumber: false,
@@ -119,6 +123,15 @@ function advanceBlock(s: GameState): GameState {
       out.k = { ...out.k, routeDead: true, routeDeadReason: 'Read at 8:47 PM.' };
     }
   }
+  // A party you let slide past just… happens without you.
+  const pp = out.pendingParty;
+  if (pp && pp.day === out.day && out.block >= pp.block) {
+    out = {
+      ...out,
+      pendingParty: null,
+      toasts: [...out.toasts, 'The party came and went without you. Dex will live.'],
+    };
+  }
   if (out.block < 3) return { ...out, block: (out.block + 1) as TimeBlock };
   return sleep(out);
 }
@@ -156,7 +169,7 @@ function startScene(
     ...s,
     seed,
     screen: 'scene',
-    scene: { sceneId, nodeId: scene.start, date, cue },
+    scene: { sceneId, nodeId: scene.start, date, cue, vars: {} },
   };
 }
 
@@ -217,6 +230,37 @@ function finishScene(s: GameState): GameState {
   if (!sc) return s;
   const scene = SCENES[sc.sceneId];
   let out: GameState = { ...s, scene: null, screen: 'life' };
+
+  // Parties are their own thing: never counted as dates, but her mood about
+  // the night still carries over.
+  if (scene.id === 'party') {
+    if (sc.date) {
+      const d = sc.date;
+      if (d.outcome === 'crash' || d.outcome === 'route-dead') {
+        out.k = { ...out.k, enthusiasm: clamp(out.k.enthusiasm - 2, -3, 3) };
+        if (d.outcome === 'route-dead' || out.k.enthusiasm <= -3) {
+          out.k = {
+            ...out.k,
+            routeDead: true,
+            routeDeadReason: 'A whole party watched. That’s the version people retell.',
+          };
+        }
+        out.mood = clamp(out.mood - 12, 0, 100);
+        out.toasts = [...out.toasts, 'That went sideways in front of everyone.'];
+      } else if (d.meters.interest >= 55 && (sc.vars.kSpotted as boolean)) {
+        out.k = { ...out.k, enthusiasm: clamp(out.k.enthusiasm + 1, -3, 3) };
+        out.mood = clamp(out.mood + 10, 0, 100);
+        out.toasts = [...out.toasts, 'Good party. Great company.'];
+      } else {
+        out.mood = clamp(out.mood + 6, 0, 100);
+        out.toasts = [...out.toasts, 'Decent party. Dex delivered.'];
+      }
+    } else {
+      out.mood = clamp(out.mood + 8, 0, 100);
+      out.toasts = [...out.toasts, 'Solid night. Your ears will ring till noon.'];
+    }
+    return advanceBlock(out);
+  }
 
   if (sc.date) {
     const d = sc.date;
@@ -350,6 +394,14 @@ function chooseInScene(s: GameState, index: number): GameState {
     for (const f of choice.unflags) delete flags[f];
     out = { ...out, k: { ...out.k, flags } };
   }
+  if (choice.setVars || choice.addVars) {
+    const vars = { ...out.scene!.vars };
+    for (const [k, v] of Object.entries(choice.setVars ?? {})) vars[k] = v;
+    for (const [k, dv] of Object.entries(choice.addVars ?? {})) {
+      vars[k] = (typeof vars[k] === 'number' ? (vars[k] as number) : 0) + dv;
+    }
+    out = { ...out, scene: { ...out.scene!, vars } };
+  }
   if (choice.effects) out = applyEffects(out, choice.effects);
   if (choice.event) out = handleEvent(out, choice.event);
 
@@ -457,6 +509,13 @@ function doActivity(s: GameState, id: string): GameState {
         toasts: [...out.toasts, 'New material banked. Charm up.'],
       };
       break;
+    case 'study':
+      out = {
+        ...out,
+        stats: { ...out.stats, intelligence: Math.min(10, out.stats.intelligence + 1) },
+        toasts: [...out.toasts, 'Three tabs deep and it finally clicked. Intelligence up.'],
+      };
+      break;
     case 'park':
       out = {
         ...out,
@@ -482,9 +541,37 @@ function doActivity(s: GameState, id: string): GameState {
           ? out.toasts
           : [...out.toasts, 'No sign of her today.'],
     };
+    // Being out and social is how party invites happen.
+    out = rollPartyInvite(out);
   }
 
   return advanceBlock(out);
+}
+
+// After a social hang, someone might press an address into your phone:
+// a house party, a night or two out, always evening or later.
+function rollPartyInvite(s: GameState): GameState {
+  if (s.pendingParty || s.gameOver) return s;
+  const r1 = nextRand(s.seed);
+  let out = { ...s, seed: r1.seed };
+  if (r1.value >= PARTY_INVITE_CHANCE) return out;
+  const r2 = nextRand(out.seed);
+  const r3 = nextRand(r2.seed);
+  out = { ...out, seed: r3.seed };
+  const day = out.day + 1 + Math.floor(r2.value * 2); // tomorrow or the day after
+  let block: TimeBlock = r3.value < 0.6 ? 2 : 3; // usually evening, sometimes late
+  const pd = out.k.pendingDate;
+  if (pd && pd.day === day && pd.block === block) block = block === 2 ? 3 : 2;
+  return {
+    ...out,
+    pendingParty: { day, block },
+    toasts: [
+      ...out.toasts,
+      `Dex — Sam’s cousin, knows everyone — grabs your shoulder on the way out: “House party, ${
+        day === out.day + 1 ? 'tomorrow' : 'day after tomorrow'
+      } ${block === 2 ? 'evening' : 'late'}. Bring nothing. Bring everything.”`,
+    ],
+  };
 }
 
 export function reducer(s: GameState, a: Action): GameState {
@@ -564,6 +651,67 @@ export function reducer(s: GameState, a: Action): GameState {
         };
       }
       return out;
+    }
+    case 'GO_TO_PARTY': {
+      const pp = s.pendingParty;
+      if (!pp || pp.day !== s.day || pp.block !== s.block || s.scene) return s;
+      let out: GameState = {
+        ...s,
+        pendingParty: null,
+        energy: clamp(s.energy - 12, 0, 100),
+      };
+      // Is she here tonight?
+      const rK = nextRand(out.seed);
+      const kChance = out.k.routeDead
+        ? 0
+        : out.k.met
+          ? 0.5 + out.k.enthusiasm * 0.05
+          : 0.4;
+      const kHere = rK.value < kChance;
+      // Party personality: overall vibe + which three of the five rooms exist.
+      const rV = nextRand(rK.seed);
+      const vibe = rV.value < 0.5 ? 'chill' : 'rowdy';
+      let seed = rV.seed;
+      const pool = [...PARTY_ROOMS];
+      const rooms: string[] = [];
+      while (rooms.length < 3) {
+        const r = nextRand(seed);
+        seed = r.seed;
+        rooms.push(pool.splice(Math.floor(r.value * pool.length), 1)[0]);
+      }
+      const dateNumber = kHere
+        ? out.k.hasNumber
+          ? Math.max(1, out.k.datesCompleted)
+          : 0
+        : null;
+      const date =
+        dateNumber === null
+          ? null
+          : {
+              venueId: 'party',
+              dateNumber,
+              meters: startMeters(out, dateNumber),
+              strikes: 0,
+              ladder: -1,
+              recentStrike: false,
+              recentKiss: false,
+              turn: 0,
+              lastRoll: null,
+              over: false,
+              outcome: null,
+            };
+      return {
+        ...out,
+        seed,
+        screen: 'scene',
+        scene: {
+          sceneId: 'party',
+          nodeId: 'arrive',
+          date,
+          cue: null,
+          vars: { kHere, kSpotted: false, vibe, rooms: rooms.join(','), drinks: 0 },
+        },
+      };
     }
     case 'CHOOSE':
       return chooseInScene(s, a.index);

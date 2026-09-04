@@ -29,7 +29,10 @@ export function Hud({ s }: { s: GameState }) {
         <Meter label="Job" value={s.job.performance} tone="job" />
       </div>
       <div className="hud-row hud-small">
-        <span>Charm {s.stats.charm} · Style {s.stats.style} · Fitness {s.stats.fitness}</span>
+        <span>
+          Charm {s.stats.charm} · Style {s.stats.style} · Fitness {s.stats.fitness} · Int{' '}
+          {s.stats.intelligence}
+        </span>
         <span>
           {s.job.fired ? 'Unemployed' : JOB_TIERS[s.job.tier].name} · {HOME_TIERS[s.homeTier].name} ·{' '}
           {CAR_TIERS[s.carTier].name}

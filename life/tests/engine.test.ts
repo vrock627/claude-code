@@ -39,7 +39,7 @@ function mkState(overrides: Partial<GameState> = {}, date: Partial<DateSession> 
     scene:
       date === null
         ? null
-        : { sceneId: 'date-coffee', nodeId: 'arrive', date: mkDate(date), cue: null },
+        : { sceneId: 'date-coffee', nodeId: 'arrive', date: mkDate(date), cue: null, vars: {} },
     ...overrides,
   };
   return s;
@@ -262,6 +262,65 @@ describe('reducer end-to-end', () => {
     s = { ...s, money: 10000 };
     const out = reducer(s, { type: 'BUY', kind: 'home', tier: 2 });
     expect(out.homeTier).toBe(0);
+  });
+
+  it('library study trains intelligence', () => {
+    let s = reducer(initialState(7), { type: 'NEW_GAME', seed: 7 });
+    const int0 = s.stats.intelligence;
+    s = reducer(s, { type: 'ACTIVITY', id: 'study' });
+    expect(s.stats.intelligence).toBe(int0 + 1);
+    expect(s.block).toBe(1);
+  });
+
+  it('social activities can produce a party invite for a future evening/night', () => {
+    let s = reducer(initialState(3), { type: 'NEW_GAME', seed: 3 });
+    s = { ...s, money: 5000, k: { ...s.k, routeDead: true } }; // no encounters, pure invite hunt
+    let guard = 0;
+    while (!s.pendingParty && guard++ < 120) {
+      if (s.block <= 1) s = reducer(s, { type: 'ACTIVITY', id: 'cafe' });
+      else s = reducer(s, { type: 'SLEEP' });
+      if (s.gameOver) break;
+    }
+    expect(s.pendingParty).not.toBeNull();
+    expect(s.pendingParty!.day).toBeGreaterThan(s.day);
+    expect([2, 3]).toContain(s.pendingParty!.block);
+  });
+
+  it('an unattended party invite expires overnight', () => {
+    let s = reducer(initialState(7), { type: 'NEW_GAME', seed: 7 });
+    s = { ...s, pendingParty: { day: s.day, block: 2 as const } };
+    s = reducer(s, { type: 'SLEEP' });
+    expect(s.pendingParty).toBeNull();
+  });
+
+  it('a party runs through the reducer and never counts as a date', () => {
+    let s = reducer(initialState(21), { type: 'NEW_GAME', seed: 21 });
+    s = {
+      ...s,
+      block: 2 as const,
+      pendingParty: { day: s.day, block: 2 as const },
+      k: { ...s.k, met: true, hasNumber: true, firstTextDone: true, stage: 3, datesCompleted: 1 },
+    };
+    const dates0 = s.k.datesCompleted;
+    s = reducer(s, { type: 'GO_TO_PARTY' });
+    expect(s.screen).toBe('scene');
+    expect(s.scene?.sceneId).toBe('party');
+    expect(s.pendingParty).toBeNull();
+    expect(typeof s.scene?.vars.vibe).toBe('string');
+    expect(String(s.scene?.vars.rooms).split(',')).toHaveLength(3);
+    let guard = 0;
+    while (s.scene && guard++ < 300) {
+      const node = currentNode(s);
+      if (!node) break;
+      const choices = visibleChoices(s, node);
+      // Bias toward leaving when available so the walk terminates.
+      const leaveIdx = choices.findIndex((c) => c.text.startsWith('Call it a night'));
+      const idx = guard > 12 && leaveIdx >= 0 ? leaveIdx : 0;
+      s = choices.length > 0 ? reducer(s, { type: 'CHOOSE', index: idx }) : reducer(s, { type: 'CONTINUE' });
+    }
+    expect(guard).toBeLessThan(300);
+    expect(s.screen).toBe('life');
+    expect(s.k.datesCompleted).toBe(dates0);
   });
 
   it('a full scripted date can run through the reducer', () => {

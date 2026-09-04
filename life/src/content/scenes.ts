@@ -6,8 +6,10 @@ import { TEXT_HUB } from './texts';
 import { DATE_COFFEE } from './dates/coffee';
 import { DATE_DINNER } from './dates/dinner';
 import { DATE_BAR } from './dates/bar';
+import { PARTY } from './party';
 
 export const SCENES: Record<string, Scene> = {
+  [PARTY.id]: PARTY,
   [ENC_CAFE.id]: ENC_CAFE,
   [ENC_PARK.id]: ENC_PARK,
   [ENC_BAR.id]: ENC_BAR,

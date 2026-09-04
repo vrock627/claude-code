@@ -16,7 +16,12 @@ export function loadGame(): GameState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.v !== 1 || !parsed.state?.k) return null;
-    return parsed.state as GameState;
+    const state = parsed.state as GameState;
+    // Migrate saves from before the intelligence stat / party system.
+    if (typeof state.stats.intelligence !== 'number') state.stats.intelligence = 2;
+    if (state.pendingParty === undefined) state.pendingParty = null;
+    if (state.scene && !state.scene.vars) state.scene.vars = {};
+    return state;
   } catch {
     return null;
   }

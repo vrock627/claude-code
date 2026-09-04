@@ -100,6 +100,15 @@ export function sleep(s: GameState): GameState {
     k: { ...s.k, textedToday: false },
   };
 
+  // Missed party invites quietly expire overnight.
+  if (out.pendingParty && out.pendingParty.day <= s.day) {
+    out = {
+      ...out,
+      pendingParty: null,
+      toasts: [...out.toasts, 'You slept through Dex’s party. Legend says it’s still going.'],
+    };
+  }
+
   // Stood her up?
   const pd = out.k.pendingDate;
   if (pd && pd.day < out.day) {

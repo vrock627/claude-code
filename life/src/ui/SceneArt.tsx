@@ -96,6 +96,48 @@ export function SceneArt({ art }: { art: string }) {
           <path d="M 226 70 q 0 14 10 16 v 6 h 4 v -6 q 10 -2 10 -16 z" fill="none" stroke="#e8cfd4" strokeWidth="2" opacity="0.8" />
         </svg>
       );
+    case 'party':
+      return (
+        <svg className="scene-art" viewBox="0 0 400 110" preserveAspectRatio="xMidYMid slice" aria-hidden>
+          <defs>
+            <linearGradient id="g-party" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#1c1030" />
+              <stop offset="1" stopColor="#2b1226" />
+            </linearGradient>
+          </defs>
+          <rect width="400" height="110" fill="url(#g-party)" />
+          {/* string lights */}
+          <path d="M 0 22 q 100 26 200 8 t 200 10" stroke="#3a2c52" strokeWidth="2" fill="none" />
+          {[30, 75, 120, 168, 215, 262, 310, 355].map((x, i) => (
+            <circle
+              key={x}
+              cx={x}
+              cy={26 + Math.sin(i * 1.7) * 9 + 6}
+              r="3.4"
+              fill={['#ffd166', '#ff5fa0', '#54e8e0', '#a78bfa'][i % 4]}
+              opacity="0.95"
+            />
+          ))}
+          {/* crowd silhouettes */}
+          <g fill="#120a1c">
+            <circle cx="70" cy="78" r="12" />
+            <rect x="56" y="88" width="28" height="26" rx="8" />
+            <circle cx="140" cy="82" r="11" />
+            <rect x="127" y="91" width="26" height="24" rx="8" />
+            <circle cx="255" cy="79" r="12" />
+            <rect x="241" y="89" width="28" height="25" rx="8" />
+            <circle cx="330" cy="83" r="10" />
+            <rect x="318" y="92" width="24" height="22" rx="8" />
+          </g>
+          {/* red cups */}
+          <g>
+            <path d="M 196 84 l 10 0 l -1.6 16 l -6.8 0 z" fill="#d64545" />
+            <path d="M 212 88 l 9 0 l -1.4 13 l -6.2 0 z" fill="#d64545" />
+          </g>
+          <circle cx="368" cy="18" r="2.2" fill="#ffd166" opacity="0.6" />
+          <circle cx="22" cy="52" r="2" fill="#ff5fa0" opacity="0.5" />
+        </svg>
+      );
     case 'phone':
       return (
         <svg className="scene-art" viewBox="0 0 400 110" preserveAspectRatio="xMidYMid slice" aria-hidden>

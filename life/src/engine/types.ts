@@ -14,12 +14,13 @@ export type Mood =
   | 'annoyed'
   | 'flushed';
 
-export type StatId = 'charm' | 'style' | 'fitness';
+export type StatId = 'charm' | 'style' | 'fitness' | 'intelligence';
 
 export interface PlayerStats {
   charm: number;
   style: number;
   fitness: number;
+  intelligence: number;
 }
 
 export interface JobState {
@@ -171,6 +172,11 @@ export interface Choice {
   learn?: string; // memory fact id gained
   callback?: string; // memory fact id spent for a bonus (requires having it)
   event?: string; // engine event, e.g. 'gotNumber', 'schedule:coffee'
+  // Scene-local variables (stored on SceneState.vars) — the fuel for dynamic
+  // branches: which party rooms rolled, whether she's been spotted, drink
+  // count, etc. setVars assigns; addVars increments numeric vars.
+  setVars?: Record<string, string | number | boolean>;
+  addVars?: Record<string, number>;
   // Conditional branch decided at click time by hidden state — e.g. she only
   // says yes to giving her number if the meters earned it.
   judge?: { pass: (s: GameState) => boolean; onPass: string; onFail: string };
@@ -206,6 +212,7 @@ export interface SceneState {
   nodeId: string;
   date: DateSession | null;
   cue: string | null; // latest body-language cue line
+  vars: Record<string, string | number | boolean>; // scene-local dynamic state
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +233,8 @@ export interface GameState {
   job: JobState;
   rentMissed: number;
   k: KrystalleState;
+  // A standing party invite: fires on that day/block, expires if skipped.
+  pendingParty: { day: number; block: TimeBlock } | null;
   scene: SceneState | null;
   seed: number; // RNG state (mulberry32), advanced on each draw
   toasts: string[];
