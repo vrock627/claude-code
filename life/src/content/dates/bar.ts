@@ -430,10 +430,38 @@ export const DATE_BAR: Scene = {
     stayWin: {
       id: 'stayWin',
       text: 'She answers by standing, taking your hand, and pulling you up after her — unhurried, certain, the neon of the whole night distilled down to the two of you and a door she closes herself.',
-      kLine: '“Encore,” she says softly, and the rest belongs to the dark.',
+      kLine: '“Encore,” she says softly.',
       mood: 'flushed',
+      next: 'night',
+      nextLabel: 'Encore',
+    },
+    night: {
+      id: 'night',
+      text: 'All the wattage of the Palms — the stage voice, the crowd-work, the applause — comes down to something quieter and truer with the door shut: her forehead against yours while you both catch up to the moment, her laugh when your elbow finds the one squeaky floorboard, the leather jacket landing somewhere unceremonious. She performs for rooms; she doesn’t perform here, and the difference is the most flattering thing that has ever happened to you. The night takes its time. So does she. So do you.',
+      kLine: 'At some point, delighted, against your jaw: “No audience and you’re STILL showing off. Good. Don’t stop.”',
+      mood: 'flushed',
+      choices: [
+        {
+          text: 'Match her honesty — no stagecraft, just her name.',
+          effects: { comfort: 8, interest: 6 },
+          flags: ['nice'],
+          goto: 'afterglow',
+        },
+        {
+          text: 'Hum four bars of the closer, badly, into her hair.',
+          effects: { momentum: 6, interest: 5 },
+          flags: ['funny'],
+          goto: 'afterglow',
+        },
+      ],
+    },
+    afterglow: {
+      id: 'afterglow',
+      text: 'After — 2 a.m. by the microwave clock — she conducts a solemn raid on your kitchen wearing your shirt like a heist disguise, narrating the fridge’s contents in her ballad voice. You eat cereal on the counter, shoulder to shoulder, hair wrecked, ears still faintly ringing from the Palms, and it is somehow the most intimate part of the entire night.',
+      kLine: '“This is the real encore,” she says, spoon raised. “The stage stuff is just the opening act.”',
+      mood: 'warm',
       next: 'morning',
-      nextLabel: '⸺',
+      nextLabel: 'Back to bed, eventually',
     },
     stayLose: {
       id: 'stayLose',
