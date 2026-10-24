@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>CoreTests</AssemblyName>
+    <RootNamespace>BlackTide.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compile the engine-agnostic Core in isolation (no UnityEngine on the path):
+         if any Core file reaches for UnityEngine, this build fails here. -->
+    <Compile Include="../BlackTide/Assets/Scripts/Core/**/*.cs" />
+  </ItemGroup>
+</Project>

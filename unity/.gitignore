@@ -1,0 +1,24 @@
+# Unity-generated / machine-local — never commit these.
+BlackTide/Library/
+BlackTide/Temp/
+BlackTide/Obj/
+BlackTide/Build/
+BlackTide/Builds/
+BlackTide/Logs/
+BlackTide/UserSettings/
+BlackTide/MemoryCaptures/
+BlackTide/.vs/
+BlackTide/.idea/
+
+# .NET build output from the core test harness
+_coretests/bin/
+_coretests/obj/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*.tmp
+
+# Unity crash/log dumps
+sysinfo.txt
+*.stackdump
