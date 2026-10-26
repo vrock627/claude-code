@@ -5,7 +5,8 @@ This is a **code-driven** Unity 6 project: it builds its camera, UI, and renderi
 runtime, so there's **no scene or prefab wiring** — you open it and press Play.
 
 > **Status:** a playable **vertical slice** — title → choose captain → open-sea map → sail →
-> a real-time sea battle (steer with the wind, fire crew-manned broadsides, localized damage,
+> an **FTL-style station battle** (post your crew to the guns, rigging, pumps and repair
+> party; reload and fire at a chosen part of the enemy; pump out flooding; patch damage;
 > sink *or* board for the prize) → port (repair / drydock / tavern) → save. Notoriety makes
 > foes tougher and bigger as you win. Quests, the full crew/quirks depth, and more content
 > come in follow-up passes.
@@ -25,12 +26,16 @@ scene if prompted → **Build**.
 
 ## Controls
 
-- **Mouse** — all menus, ports, ship targets, FIRE/BOARD buttons.
-- **A / D** or **← / →** — steer.
-- **W / S** — raise / ease sail.
-- **Space** — pause (issue orders while paused).
+The battle is real-time with pause — there's no steering. You win by managing the ship.
+
+- **Mouse** — everything: menus, ports, enemy target area, and the crew stations.
+- **Post a crew member** — click a mate, then click a station (Gun Deck / Rigging / Bilge
+  Pumps / Repair Party) to send them there. The gun deck reloads and aims; the rigging helps
+  you dodge and mends masts; the pumps bail water and patch the hull; the repair party mends
+  the rudder, guns and deck and resists boarders.
+- **Space** — pause (issue orders freely while paused).
 - **1 / 2 / 3** — round / chain / grape shot.
-- **F** — fire the bearing broadside. **B** — board when alongside.
+- **F** — fire the loaded guns at the chosen area. **B** — grapple and board for the prize.
 
 ## Project layout
 

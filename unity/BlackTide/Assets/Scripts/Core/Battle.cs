@@ -1,5 +1,9 @@
-// Black Tide — real-time naval battle simulation. Pure C# (no UnityEngine),
-// ported from pirates/game.js (updateBattle / fireSide / updateBoarding / endBattle).
+// Black Tide — FTL-style station battle. Pure C# (no UnityEngine).
+// There are no positions and no manoeuvring: the two ships lie alongside and the
+// fight is won by managing the ship. Crew are posted to STATIONS (Guns, Sails,
+// Pumps, Repair); the posting drives gun reload/accuracy, evasion, flooding and
+// damage-control. Guns reload over time and fire when ordered. You may grapple
+// and board to take the ship whole.
 using System;
 using System.Collections.Generic;
 
@@ -16,7 +20,6 @@ namespace BlackTide.Core
     {
         public BattleShip player, enemy;
         public EnemyTemplate tmpl;      // scaled template (rewards / name)
-        public double windDir;
         public bool paused;
         public string shot = "round";
         public string target = "hull";
@@ -28,47 +31,75 @@ namespace BlackTide.Core
         public string flash;
         public double flashT;
 
-        // per-frame steering input (set by the presentation layer)
-        public bool turnLeft, turnRight;
-
         private readonly Run run;
         private readonly Random rng;
 
         public Battle(Run run, Random rng) { this.run = run; this.rng = rng; }
 
         // ---- helpers ----
-        static double Norm(double a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
         static double Clamp(double v, double lo, double hi) => v < lo ? lo : (v > hi ? hi : v);
-        static double Dist(BattleShip a, BattleShip b) => Math.Sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
-        public int OperationalPerSide(BattleShip s) => Math.Max(0, (int)Math.Ceiling(s.sc.GunsPerSide * s.areas.guns / Tuning.AreaMax));
-        bool CannonOnline(Cannon c, BattleShip s) => c.slot < OperationalPerSide(s);
 
-        double WindFactor(double heading)
+        public void TogglePause() => paused = !paused;
+        public void SetShot(string s) { if (Database.Shots.ContainsKey(s)) shot = s; }
+        public void SetTarget(string a) { target = a; }
+
+        // ---- crew stations ----
+        public void AssignStation(Crew c, Station s) { if (c != null) c.station = s; }
+        public int CountAt(Station s)
         {
-            double c = Math.Cos(Norm(heading - windDir));
-            return Tuning.WindMinFactor + (Tuning.WindMaxFactor - Tuning.WindMinFactor) * (c + 1) / 2;
+            int n = 0; foreach (var c in run.crew) if (c.hp > 0 && c.station == s) n++; return n;
         }
-        double ShipMaxSpeed(BattleShip s, double sailEff)
+        double AvgSkill(Station s, Func<Crew, double> sel)
         {
-            double mast = s.areas.masts / Tuning.AreaMax;
-            double mult = 1;
-            if (s.isPlayer && run.captain != null && Database.Captains.TryGetValue(run.captain, out var p)) mult *= p.SpeedMult;
-            return s.sc.MaxSpeed * (0.35 + 0.65 * mast) * WindFactor(s.heading) * sailEff * mult;
+            double sum = 0; int n = 0;
+            foreach (var c in run.crew) if (c.hp > 0 && c.station == s) { sum += sel(c); n++; }
+            return n == 0 ? 0 : sum / n;
         }
-        double CannonReload(Cannon cn, bool isPlayer)
+
+        // ---- gun maths ----
+        public int TotalCannons(BattleShip s) => s.cannons.Count;
+        public int OperationalCannons(BattleShip s)
+            => Math.Max(0, (int)Math.Ceiling(s.cannons.Count * (s.areas.guns / Tuning.AreaMax)));
+        int EnemyGunners() => (int)Math.Floor(enemy.crew * 0.6);
+        public int CrewedCannons()
+            => Math.Min(OperationalCannons(player), Math.Max(0, CountAt(Station.Guns)) * Tuning.CannonsPerGunner);
+        int CrewedCannonsEnemy()
+            => Math.Min(OperationalCannons(enemy), Math.Max(0, EnemyGunners()) * Tuning.CannonsPerGunner);
+        public int LoadedCannons(BattleShip s)
+        {
+            int op = OperationalCannons(s), n = 0, gun = 0;
+            for (int i = 0; i < s.cannons.Count && gun < op; i++) { gun++; if (s.cannons[i].loaded) n++; }
+            return n;
+        }
+        double ReloadTime(bool isPlayer, double avgGun)
         {
             double mult = 1;
             if (isPlayer && run.captain != null && Database.Captains.TryGetValue(run.captain, out var p)) mult = p.ReloadMult;
-            return (Tuning.ReloadBase * mult) / (0.6 + Tuning.GunnerReloadK * cn.gunnerSkill);
+            return (Tuning.ReloadBase * mult) / (0.6 + Tuning.GunnerReloadK * avgGun);
         }
-        // crew-count driven effectiveness (slice: no per-station assignment UI yet)
-        double HandsEff() => Clamp(run.crew.Count / (double)Math.Max(1, player.sc.CrewIdeal), 0.4, 1.5);
-        int CrewAlive() => run.crew.Count;
 
-        public void TogglePause() => paused = !paused;
-        public void AdjustSail(double d) { player.sailLevel = Clamp(player.sailLevel + d, 0, 1); }
-        public void SetShot(string s) { if (Database.Shots.ContainsKey(s)) shot = s; }
-        public void SetTarget(string a) { target = a; }
+        // ---- evasion: how often a volley goes wide (rigging + sound masts/rudder) ----
+        double EvasionOf(BattleShip s)
+        {
+            double ev;
+            if (s.isPlayer)
+            {
+                int sailors = CountAt(Station.Sails);
+                double avgSail = AvgSkill(Station.Sails, c => c.sailing);
+                ev = Tuning.EvasionBase + Tuning.EvasionPerSailor * sailors * (0.6 + 0.12 * avgSail);
+                if (run.captain != null && Database.Captains.TryGetValue(run.captain, out var p)) ev *= p.SpeedMult;
+            }
+            else
+            {
+                int sailors = (int)Math.Floor(s.crew * 0.2);
+                ev = Tuning.EvasionBase + Tuning.EvasionPerSailor * sailors;
+            }
+            ev *= 0.45 + 0.55 * (s.areas.masts / Tuning.AreaMax);   // shot-away rigging kills the dodge
+            ev *= 0.60 + 0.40 * (s.areas.rudder / Tuning.AreaMax);  // a smashed rudder, too
+            return Clamp(ev, 0, Tuning.EvasionMax);
+        }
+        public double PlayerEvasion() => EvasionOf(player);
+        public double EnemyEvasion() => EvasionOf(enemy);
 
         // ---- the loop ----
         public void Update(double dt)
@@ -79,20 +110,19 @@ namespace BlackTide.Core
             time += dt;
             var p = player; var e = enemy;
 
-            // player movement
-            double rudder = p.areas.rudder / Tuning.AreaMax;
-            double turn = p.sc.TurnRate * (0.5 + 0.5 * HandsEff()) * (0.3 + 0.7 * rudder);
-            if (turnLeft) p.heading = Norm(p.heading - turn * dt);
-            if (turnRight) p.heading = Norm(p.heading + turn * dt);
-            double sailEffP = 0.55 + 0.45 * HandsEff();
-            StepShip(p, ShipMaxSpeed(p, sailEffP) * p.sailLevel, dt);
-            UpdateFlooding(p, HandsEff() * Tuning.PumpRate, dt);
-
-            TickCannons(p, dt);
+            // player guns + damage-control + bilge
+            double pAvgGun = AvgSkill(Station.Guns, c => c.gunnery);
+            TickCannons(p, CrewedCannons(), dt);
+            PlayerRepair(dt);
+            double pump = Tuning.PumpRate * Clamp(CountAt(Station.Pumps) * (0.5 + 0.12 * AvgSkill(Station.Pumps, c => c.repair)), 0, 2.2);
+            UpdateFlooding(p, pump, dt);
 
             // enemy
-            if (!e.surrendered) UpdateEnemyAI(e, p, dt);
-            else StepShip(e, ShipMaxSpeed(e, 0.5) * 0.3, dt);
+            if (!e.surrendered)
+            {
+                TickCannons(e, CrewedCannonsEnemy(), dt);
+                EnemyMaybeFire();
+            }
             UpdateFlooding(e, Tuning.PumpRate * 0.5, dt);
 
             if (!e.surrendered && !e.sunk && (e.areas.hull <= Tuning.EnemyHullSurrender || e.crew <= Tuning.EnemyCrewSurrender))
@@ -103,20 +133,8 @@ namespace BlackTide.Core
 
             if (e.water >= Tuning.FloodSink || e.areas.hull <= 0) { e.sunk = true; EndBattle("sunk"); return; }
             if (p.water >= Tuning.FloodSink || p.areas.hull <= 0) { EndBattle("lost"); return; }
-            if (CrewAlive() <= 0) { EndBattle("lost"); return; }
+            if (run.crew.Count <= 0) { EndBattle("lost"); return; }
             if (flashT > 0) flashT -= dt;
-        }
-
-        void StepShip(BattleShip s, double targetSpeed, double dt)
-        {
-            targetSpeed = Math.Max(0, targetSpeed);
-            if (s.speed < targetSpeed) s.speed = Math.Min(targetSpeed, s.speed + Tuning.Accel * dt);
-            else s.speed = Math.Max(targetSpeed, s.speed - (s.speed - targetSpeed) * dt * 1.5);
-            s.x += Math.Cos(s.heading) * s.speed * dt;
-            s.y += Math.Sin(s.heading) * s.speed * dt;
-            const double m = 30;
-            s.x = Clamp(s.x, m, Tuning.ArenaW - m);
-            s.y = Clamp(s.y, m, Tuning.ArenaH - m);
         }
 
         void UpdateFlooding(BattleShip s, double pump, double dt)
@@ -126,74 +144,104 @@ namespace BlackTide.Core
             s.water = Clamp(s.water + (rate - pump) * dt, 0, Tuning.FloodSink);
         }
 
-        void TickCannons(BattleShip s, double dt)
+        // Only the first `crewed` operational guns reload; the rest sit idle for want of hands.
+        void TickCannons(BattleShip s, int crewed, double dt)
         {
-            foreach (var cn in s.cannons)
+            for (int i = 0; i < s.cannons.Count; i++)
             {
-                if (!cn.manned || !CannonOnline(cn, s)) { cn.loaded = false; continue; }
+                var cn = s.cannons[i];
+                if (i >= crewed) continue;
                 if (!cn.loaded) { cn.reload -= dt; if (cn.reload <= 0) { cn.reload = 0; cn.loaded = true; } }
             }
         }
 
-        public string BearingSide(BattleShip a, BattleShip b)
+        // ---- damage-control: posted hands slowly mend their part of the ship ----
+        void PlayerRepair(double dt)
         {
-            double ang = Norm(Math.Atan2(b.y - a.y, b.x - a.x) - a.heading);
-            double arc = Tuning.GunArcDeg * Math.PI / 180;
-            if (Math.Abs(Norm(ang + Math.PI / 2)) < arc) return "port";
-            if (Math.Abs(Norm(ang - Math.PI / 2)) < arc) return "star";
-            return null;
+            var a = player.areas;
+            double sails = RepairPower(Station.Sails, c => c.sailing, dt);
+            if (sails > 0) a.masts = Math.Min(Tuning.AreaMax, a.masts + sails);
+            double pumpsFix = RepairPower(Station.Pumps, c => c.repair, dt) * 0.6;
+            if (pumpsFix > 0) a.hull = Math.Min(Tuning.AreaMax, a.hull + pumpsFix);
+            double rep = RepairPower(Station.Repair, c => c.repair, dt);
+            if (rep > 0)
+            {
+                string worst = "rudder"; double wv = a.rudder;
+                if (a.guns < wv) { worst = "guns"; wv = a.guns; }
+                if (a.deck < wv) { worst = "deck"; wv = a.deck; }
+                a.Set(worst, Math.Min(Tuning.AreaMax, wv + rep));
+            }
         }
-        public int SideLoaded(BattleShip s, string side)
+        double RepairPower(Station st, Func<Crew, double> skill, double dt)
         {
-            int n = 0;
-            foreach (var cn in s.cannons) if (cn.side == side && cn.loaded && cn.manned && CannonOnline(cn, s)) n++;
-            return n;
+            int n = CountAt(st); if (n <= 0) return 0;
+            return Tuning.RepairRate * n * (0.5 + 0.12 * AvgSkill(st, skill)) * dt;
         }
 
+        // ---- gunnery ----
         // player fire order (never automatic)
         public void FirePlayer()
         {
             if (outcome != null || boarding != null || enemy.sunk) return;
-            string side = BearingSide(player, enemy);
-            if (side == null) { flash = "No guns bear — turn to bring a broadside about!"; flashT = 1.6; return; }
-            if (SideLoaded(player, side) == 0) { flash = "No loaded guns on the " + side + " side."; flashT = 1.4; return; }
-            FireSide(player, enemy, side);
+            int op = OperationalCannons(player);
+            if (op <= 0) { flash = "Your guns are dismounted — post hands to Repair!"; flashT = 1.6; return; }
+            if (LoadedCannons(player) == 0) { flash = "No guns loaded — the crew are still ramming home."; flashT = 1.5; return; }
+            FireVolley(player, enemy, target, shot, AvgSkill(Station.Guns, c => c.gunnery));
         }
 
-        void FireSide(BattleShip attacker, BattleShip defender, string side)
+        void EnemyMaybeFire()
         {
-            var shotKind = attacker.isPlayer ? Database.Shots[shot] : Database.Shots["round"];
-            string targetArea = attacker.isPlayer ? target : "hull";
-            double range = Dist(attacker, defender);
-            bool inRange = range <= attacker.sc.GunRange;
-            bool bears = BearingSide(attacker, defender) == side;
-            double rangeFrac = Clamp(range / attacker.sc.GunRange, 0, 1);
-            double motionFrac = Clamp(defender.speed / defender.sc.MaxSpeed, 0, 1);
-            int hits = 0, fired = 0;
-            foreach (var cn in attacker.cannons)
+            var e = enemy;
+            int op = OperationalCannons(e); if (op <= 0) return;
+            if (LoadedCannons(e) < Math.Max(1, op / 2)) return;
+            string area = WeightedEnemyTarget();
+            string sk = (e.aggression > 0.7 && run.crew.Count >= 4 && rng.NextDouble() < 0.35) ? "grape" : "round";
+            FireVolley(e, player, area, sk, e.gunnery);
+        }
+
+        string WeightedEnemyTarget()
+        {
+            // favour the hull, then the guns, then raking the deck
+            double r = rng.NextDouble();
+            if (r < 0.40) return "hull";
+            if (r < 0.65) return "guns";
+            if (r < 0.85) return "deck";
+            if (r < 0.95) return "masts";
+            return "rudder";
+        }
+
+        // Discharge every loaded, operational gun at one area. Returns guns fired.
+        int FireVolley(BattleShip atk, BattleShip def, string area, string shotKey, double avgGun)
+        {
+            var shotKind = Database.Shots.ContainsKey(shotKey) ? Database.Shots[shotKey] : Database.Shots["round"];
+            double ev = EvasionOf(def);
+            int op = OperationalCannons(atk);
+            int fired = 0, hits = 0, gun = 0;
+            for (int i = 0; i < atk.cannons.Count && gun < op; i++)
             {
-                if (cn.side != side || !cn.loaded || !cn.manned || !CannonOnline(cn, attacker)) continue;
+                var cn = atk.cannons[i];
+                gun++;
+                if (!cn.loaded) continue;
                 fired++;
                 cn.loaded = false;
-                cn.reloadMax = CannonReload(cn, attacker.isPlayer);
+                cn.reloadMax = ReloadTime(atk.isPlayer, avgGun);
                 cn.reload = cn.reloadMax;
-                if (!bears || !inRange) continue;
-                double acc = Tuning.AccuracyBase * (1 - rangeFrac * Tuning.AccuracyRangeFalloff)
-                    * (1 - motionFrac * Tuning.AccuracyMotionPenalty) * (1 + Tuning.GunnerAccK * cn.gunnerSkill);
+                double acc = Tuning.AccuracyBase * (1 + Tuning.GunnerAccK * avgGun) * (1 - ev);
                 if (rng.NextDouble() < Clamp(acc, 0.05, 0.96)) hits++;
             }
-            if (fired == 0) return;
-            string who = attacker.isPlayer ? "Your" : "Enemy";
+            if (fired == 0) return 0;
+            string who = atk.isPlayer ? "Your" : "Enemy";
             if (hits > 0)
             {
-                double bias = shotKind.Bias.TryGetValue(targetArea, out var bv) ? bv : 0.7;
+                double bias = shotKind.Bias.TryGetValue(area, out var bv) ? bv : 0.7;
                 double dmg = hits * shotKind.Base * bias;
-                defender.areas.Set(targetArea, Math.Max(0, defender.areas.Get(targetArea) - dmg));
-                double cas = shotKind.Casualty * (targetArea == "deck" ? 1.5 : 1) * hits * 0.5;
-                if (rng.NextDouble() < cas) ApplyCasualty(defender);
-                Log(who + " " + side + " battery: " + hits + "/" + fired + " into the " + targetArea);
+                def.areas.Set(area, Math.Max(0, def.areas.Get(area) - dmg));
+                double cas = shotKind.Casualty * (area == "deck" ? 1.5 : 1) * hits * 0.5;
+                if (rng.NextDouble() < cas) ApplyCasualty(def);
+                Log(who + " guns: " + hits + "/" + fired + " into the " + area);
             }
-            else Log(who + " " + side + " battery: " + fired + " fired, " + (bears && inRange ? "all missed" : "none bore"));
+            else Log(who + " guns: " + fired + " fired — all wide");
+            return fired;
         }
 
         void ApplyCasualty(BattleShip defender)
@@ -213,36 +261,11 @@ namespace BlackTide.Core
             }
         }
 
-        void UpdateEnemyAI(BattleShip e, BattleShip p, double dt)
-        {
-            double range = Dist(e, p);
-            double toP = Norm(Math.Atan2(p.y - e.y, p.x - e.x) - e.heading);
-            double preferred = e.sc.GunRange * 0.62;
-            double desiredRel = range > preferred * 1.25 ? toP : (toP > 0 ? toP - Math.PI / 2 : toP + Math.PI / 2);
-            double rudder = e.areas.rudder / Tuning.AreaMax;
-            double turn = e.sc.TurnRate * (0.4 + 0.6 * rudder);
-            if (desiredRel > 0.05) e.heading = Norm(e.heading + Math.Min(turn * dt, desiredRel));
-            else if (desiredRel < -0.05) e.heading = Norm(e.heading - Math.Min(turn * dt, -desiredRel));
-            StepShip(e, ShipMaxSpeed(e, 0.9) * (0.5 + 0.5 * e.aggression), dt);
-            TickCannons(e, dt);
-            if (range <= e.sc.GunRange)
-            {
-                string side = BearingSide(e, p);
-                if (side != null)
-                {
-                    int ops = OperationalPerSide(e), loaded = SideLoaded(e, side);
-                    if (loaded > 0 && loaded >= (int)Math.Ceiling(ops / 2.0)) FireSide(e, p, side);
-                }
-            }
-        }
-
-        // ---- boarding ----
-        public bool CanBoard() => Dist(player, enemy) <= Tuning.GrappleRange && !enemy.sunk && boarding == null && outcome == null;
+        // ---- boarding (ships lie alongside, so grapples are always an option) ----
+        public bool CanBoard() => !enemy.sunk && boarding == null && outcome == null;
         public void TryBoard()
         {
             if (outcome != null || boarding != null || enemy.sunk) return;
-            if (Dist(player, enemy) > Tuning.GrappleRange) { flash = "Too far — close to grapple range!"; flashT = 1.5; return; }
-            player.speed = 0; enemy.speed = 0;
             double meleeMult = 1;
             if (run.captain != null && Database.Captains.TryGetValue(run.captain, out var p)) meleeMult = p.MeleeMult;
             double pStr = 0;
@@ -266,7 +289,7 @@ namespace BlackTide.Core
             while (bd.eCasualty >= 1 && enemy.crew > 0) { enemy.crew--; bd.eCasualty -= 1; }
             WoundRandomCrew(pLoss * Tuning.WoundBoardScale);
             if (enemy.crew <= 0) { bd.done = true; EndBattle("captured"); }
-            else if (CrewAlive() <= 0) { bd.done = true; EndBattle("lost"); }
+            else if (run.crew.Count <= 0) { bd.done = true; EndBattle("lost"); }
         }
 
         void EndBattle(string kind)
@@ -301,6 +324,6 @@ namespace BlackTide.Core
             outcome = o;
         }
 
-        void Log(string s) { log.Insert(0, s); if (log.Count > 5) log.RemoveAt(log.Count - 1); }
+        void Log(string s) { log.Insert(0, s); if (log.Count > 6) log.RemoveAt(log.Count - 1); }
     }
 }

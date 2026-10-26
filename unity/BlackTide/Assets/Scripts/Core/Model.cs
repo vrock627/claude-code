@@ -31,12 +31,18 @@ namespace BlackTide.Core
         public static Areas Fresh() => new Areas();
     }
 
+    // Where a hand is posted during a battle (FTL-style stations). Transient: it is
+    // reset at the start of every fight and never persisted, so it is [NonSerialized].
+    public enum Station { Guns, Sails, Pumps, Repair }
+
     [Serializable]
     public class Crew
     {
         public string name;
         public double gunnery, sailing, repair, melee;
         public double hp = 100, maxHp = 100;
+
+        [NonSerialized] public Station station;   // battle posting (set when a fight begins)
     }
 
     // The saved run (what persists between ports / across sessions).
@@ -65,12 +71,12 @@ namespace BlackTide.Core
     }
 
     // ---- runtime-only battle types (not serialized) ----
+    // A single gun. In the station model there are no port/star sides and no
+    // positions: a gun simply reloads (when crewed) and fires when ordered.
     public sealed class Cannon
     {
-        public int id, slot;
-        public string side;          // "port" | "star"
-        public bool manned, loaded;
-        public double gunnerSkill;
+        public int id;
+        public bool loaded;
         public double reload, reloadMax;
     }
 
@@ -79,10 +85,9 @@ namespace BlackTide.Core
         public ShipClass sc;
         public bool isPlayer;
         public Areas areas;
-        public double x, y, heading, speed, sailLevel = 1;
         public double water;
-        public int crew;
-        public double gunnery = 1;
+        public int crew;                 // headcount (enemy is modelled as a headcount only)
+        public double gunnery = 1;        // enemy gun skill; player guns read live crew skill
         public List<Cannon> cannons = new List<Cannon>();
         public bool surrendered, sunk;
         public double aggression = 0.5;

@@ -46,39 +46,47 @@ static class Tests
         Check(Database.Ships[hi.ShipClass].Tier > Database.Ships[lo.ShipClass].Tier, "notoriety upgrades the enemy hull");
         g.run.notoriety = 0;
 
-        // ---- firing: a bearing, manned, loaded broadside damages the enemy; unmanned never fires ----
+        // ---- stations + gunnery: no gunners → cold guns; posted gunners load & hit ----
         g.SailTo(1);   // merchant battle
         Check(g.screen == Screen.Battle && g.battle != null, "sailing to an enemy starts a battle");
         var b = g.battle; var p = b.player; var e = b.enemy;
-        p.heading = 0;                       // facing east → port beam points north (−y)
-        e.x = p.x; e.y = p.y - 150;          // enemy on the port beam, in range
         b.paused = false; b.shot = "round"; b.target = "hull";
-        // make an unmanned port cannon and watch it stay dark
-        var unmanned = p.cannons.Find(c => c.side == "port");
-        unmanned.manned = false; unmanned.loaded = false;
-        for (int i = 0; i < 300; i++) b.Update(1.0 / 60);
-        Check(!unmanned.loaded, "an unmanned cannon never loads/fires");
-        // man + load the rest of the port battery and fire a few volleys
+
+        // post every hand AWAY from the guns → the battery never loads
+        foreach (var c in g.run.crew) b.AssignStation(c, Station.Sails);
+        foreach (var cn in p.cannons) { cn.loaded = false; cn.reload = Tuning.ReloadBase; cn.reloadMax = Tuning.ReloadBase; }
+        for (int i = 0; i < 600; i++) b.Update(1.0 / 60);
+        Check(b.CrewedCannons() == 0, "no hands at the gun deck → no crewed guns");
+        Check(b.LoadedCannons(p) == 0, "with no gunners posted, the guns never load");
+
+        // post gunners → the battery loads, and firing at the hull damages her
+        foreach (var c in g.run.crew) { b.AssignStation(c, Station.Guns); c.gunnery = 6; }
+        for (int i = 0; i < 600 && b.LoadedCannons(p) == 0; i++) b.Update(1.0 / 60);
+        Check(b.LoadedCannons(p) > 0, "posted gunners reload the battery over time");
         double beforeHull = e.areas.hull;
         bool damaged = false;
-        for (int volley = 0; volley < 6 && !damaged; volley++)
+        for (int volley = 0; volley < 10 && !damaged && b.outcome == null; volley++)
         {
-            foreach (var c in p.cannons) if (c.side == "port" && c != unmanned) { c.manned = true; c.gunnerSkill = 6; c.loaded = true; }
-            e.x = p.x; e.y = p.y - 150; p.heading = 0;   // keep the geometry
+            for (int i = 0; i < 600 && b.LoadedCannons(p) == 0 && b.outcome == null; i++) b.Update(1.0 / 60);
             b.FirePlayer();
             if (e.areas.hull < beforeHull) damaged = true;
         }
-        Check(damaged, "pressing fire on a bearing loaded side damages the enemy");
+        Check(damaged, "firing a loaded battery at the hull damages the enemy");
 
-        // ---- flooding → sink → outcome + rewards ----
-        int goldBefore = g.run.gold, notorBefore = g.run.notoriety;
-        e.areas.hull = 0;
-        b.Update(0.2);
-        Check(b.outcome != null && b.outcome.kind == "sunk", "a holed hull floods and sinks the enemy");
-        Check(g.run.gold > goldBefore, "sinking pays gold");
-        Check(g.run.notoriety > notorBefore, "a win raises notoriety");
-        g.FinishBattle();
-        Check(g.screen == Screen.Map, "finishing a won battle returns to the map");
+        // ---- flooding → sink → outcome + rewards (fresh fight so the rewards are clean) ----
+        var gs = new Game(seed: 3);
+        gs.NewGame("privateer");
+        gs.run.notoriety = 0;
+        gs.SailTo(1);
+        var bs = gs.battle;
+        int goldBefore = gs.run.gold, notorBefore = gs.run.notoriety;
+        bs.enemy.areas.hull = 0;
+        bs.Update(0.2);
+        Check(bs.outcome != null && bs.outcome.kind == "sunk", "a holed hull floods and sinks the enemy");
+        Check(gs.run.gold > goldBefore, "sinking pays gold");
+        Check(gs.run.notoriety > notorBefore, "a win raises notoriety");
+        gs.FinishBattle();
+        Check(gs.screen == Screen.Map, "finishing a won battle returns to the map");
 
         // ---- drydock: buy a bigger hull (trade-in) ----
         g.run.gold = 3000;
@@ -94,8 +102,7 @@ static class Tests
         g2.run.notoriety = 0;
         g2.SailTo(1);                 // merchant = brig (tier 1) vs our sloop (tier 0)
         var b2 = g2.battle;
-        b2.enemy.x = b2.player.x + 30; b2.enemy.y = b2.player.y;   // alongside
-        b2.enemy.crew = 1;
+        b2.enemy.crew = 1;            // a beaten crew — grapples are always an option now
         b2.TryBoard();
         for (int i = 0; i < 400 && b2.outcome == null; i++) b2.Update(0.1);
         Check(b2.outcome != null && b2.outcome.kind == "captured", "boarding a beaten crew captures the ship");

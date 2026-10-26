@@ -118,46 +118,36 @@ namespace BlackTide.Core
             var tmpl = ScaleEnemy(Database.Enemies[node.enemy]);
             double playerGun = 1; foreach (var c in run.crew) playerGun += c.gunnery; playerGun /= Math.Max(1, run.crew.Count);
             var player = MakeBattleShip(run.shipClass, true, run.areas, run.crew.Count, playerGun);
-            player.x = Tuning.ArenaW * 0.30; player.y = Tuning.ArenaH * 0.62; player.heading = -0.5;
             var enemy = MakeBattleShip(tmpl.ShipClass, false, Areas.Fresh(), tmpl.Crew, tmpl.Gunnery);
-            enemy.x = Tuning.ArenaW * 0.68; enemy.y = Tuning.ArenaH * 0.32; enemy.heading = Math.PI * 0.8;
             enemy.aggression = tmpl.Aggression;
 
-            battle = new Battle(run, rng) { player = player, enemy = enemy, tmpl = tmpl, windDir = Rand(-Math.PI, Math.PI) };
+            battle = new Battle(run, rng) { player = player, enemy = enemy, tmpl = tmpl };
             battle.currentNode = node.id;
-            AssignPlayerCannons(player);
+            AssignDefaultStations();
             screen = Screen.Battle;
         }
         BattleShip MakeBattleShip(string shipKey, bool isPlayer, Areas areas, int crewCount, double gunnery)
         {
             var sc = Database.Ships[shipKey];
             var s = new BattleShip { sc = sc, isPlayer = isPlayer, areas = areas, crew = crewCount, gunnery = gunnery };
-            int id = 0;
-            foreach (var side in new[] { "port", "star" })
-                for (int slot = 0; slot < sc.GunsPerSide; slot++)
-                    s.cannons.Add(new Cannon
-                    {
-                        id = id++, side = side, slot = slot,
-                        manned = !isPlayer, gunnerSkill = isPlayer ? 0 : gunnery,
-                        reload = Rand(0, Tuning.ReloadBase), reloadMax = Tuning.ReloadBase, loaded = false,
-                    });
+            int guns = sc.GunsPerSide * 2;   // a full battery; no sides in the station model
+            for (int id = 0; id < guns; id++)
+                s.cannons.Add(new Cannon { id = id, reload = Rand(0, Tuning.ReloadBase), reloadMax = Tuning.ReloadBase, loaded = false });
             return s;
         }
-        // Man the player's cannons from the crew's best gunners, interleaving sides.
-        void AssignPlayerCannons(BattleShip p)
+        // Post the crew sensibly at the start of a fight: the best gunners to the guns
+        // (enough hands to work the battery), the rest spread over sails / pumps / repair.
+        void AssignDefaultStations()
         {
             var sorted = new List<Crew>(run.crew);
             sorted.Sort((a, b) => b.gunnery.CompareTo(a.gunnery));
-            var order = new List<Cannon>();
-            for (int slot = 0; slot < p.sc.GunsPerSide; slot++)
-                foreach (var side in new[] { "port", "star" })
-                    order.Add(p.cannons.Find(c => c.side == side && c.slot == slot));
-            int gi = 0;
-            foreach (var cn in order)
-            {
-                if (gi >= sorted.Count) break;
-                cn.manned = true; cn.gunnerSkill = sorted[gi].gunnery; gi++;
-            }
+            int cannons = run.Ship.GunsPerSide * 2;
+            int gunsWanted = Math.Max(1, (int)Math.Ceiling(cannons / (double)Tuning.CannonsPerGunner));
+            gunsWanted = Math.Min(gunsWanted, Math.Max(1, sorted.Count - 2));   // leave a few for the ship
+            var rotate = new[] { Station.Sails, Station.Pumps, Station.Repair };
+            int r = 0;
+            for (int i = 0; i < sorted.Count; i++)
+                sorted[i].station = i < gunsWanted ? Station.Guns : rotate[r++ % rotate.Length];
         }
 
         public void FinishBattle()

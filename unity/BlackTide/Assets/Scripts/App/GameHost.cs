@@ -12,13 +12,12 @@ namespace BlackTide.App
     public sealed class GameHost : MonoBehaviour
     {
         // virtual canvas (letterboxed to the window)
-        const float W = 960f, H = 600f, HUD_TOP = 452f;
-        // arena → screen transform (battle plane fits above the HUD)
-        float AS, AOX, AOY;
+        const float W = 960f, H = 600f;
 
         Game game;
         Texture2D white;
         readonly HashSet<KeyCode> held = new HashSet<KeyCode>();
+        Crew selectedCrew;     // battle: the mate picked up, awaiting a station
         float acc;
         const float STEP = 1f / 60f;
         const string SAVE_KEY = "blackTideSave_v1";
@@ -52,12 +51,9 @@ namespace BlackTide.App
             if (game == null) return;
             if (game.screen == GameScreen.Battle && game.battle != null)
             {
-                var b = game.battle;
-                b.turnLeft = held.Contains(KeyCode.A) || held.Contains(KeyCode.LeftArrow);
-                b.turnRight = held.Contains(KeyCode.D) || held.Contains(KeyCode.RightArrow);
                 acc += Time.deltaTime;
                 if (acc > 0.25f) acc = 0.25f;
-                while (acc >= STEP) { b.Update(STEP); acc -= STEP; }
+                while (acc >= STEP) { game.battle.Update(STEP); acc -= STEP; }
             }
         }
 
@@ -72,8 +68,6 @@ namespace BlackTide.App
                 else if (k == KeyCode.Alpha1) b.SetShot("round");
                 else if (k == KeyCode.Alpha2) b.SetShot("chain");
                 else if (k == KeyCode.Alpha3) b.SetShot("grape");
-                else if (k == KeyCode.W || k == KeyCode.UpArrow) b.AdjustSail(0.25);
-                else if (k == KeyCode.S || k == KeyCode.DownArrow) b.AdjustSail(-0.25);
             }
         }
 
@@ -89,9 +83,6 @@ namespace BlackTide.App
             Vector2 off = new Vector2((UnityEngine.Screen.width - W * s) * 0.5f, (UnityEngine.Screen.height - H * s) * 0.5f);
             Matrix4x4 prevMatrix = GUI.matrix;
             GUI.matrix = Matrix4x4.TRS(new Vector3(off.x, off.y, 0), Quaternion.identity, new Vector3(s, s, 1));
-
-            AS = Mathf.Min(W / (float)Tuning.ArenaW, HUD_TOP / (float)Tuning.ArenaH);
-            AOX = (W - (float)Tuning.ArenaW * AS) * 0.5f; AOY = 0;
 
             switch (game.screen)
             {
@@ -155,8 +146,8 @@ namespace BlackTide.App
             if (Btn(W / 2 - 110, 290, 220, 52, "New Voyage", 20, Wood)) { game.screen = GameScreen.Create; }
             bool cont = PlayerPrefs.HasKey(SAVE_KEY);
             if (Btn(W / 2 - 110, 356, 220, 46, "Continue", 18, null, !cont) && cont) Load();
-            Txt("Maneuver with the wind. Bring your broadside to bear. Board for the prize.", 0, 470, 15, Dim, TextAnchor.UpperCenter);
-            Txt("A/D steer  ·  W/S sail  ·  Space pause  ·  F fire  ·  mouse for menus", 0, 496, 14, Dim, TextAnchor.UpperCenter);
+            Txt("Post your crew. Work the guns. Pump, patch, and board for the prize.", 0, 470, 15, Dim, TextAnchor.UpperCenter);
+            Txt("Space pause  ·  F fire  ·  B board  ·  1/2/3 shot  ·  click a mate, then a station", 0, 496, 14, Dim, TextAnchor.UpperCenter);
         }
 
         void Create()
@@ -237,9 +228,6 @@ namespace BlackTide.App
         }
 
         // ---------------------------------------------------------------- battle
-        float ax(double wx) => AOX + (float)wx * AS;
-        float ay(double wy) => AOY + (float)wy * AS;
-
         void DrawLine(float x1, float y1, float x2, float y2, float thickness)
         {
             Vector2 d = new Vector2(x2 - x1, y2 - y1); float len = d.magnitude; if (len < 0.01f) return;
@@ -250,106 +238,158 @@ namespace BlackTide.App
             GUI.matrix = prev;
         }
 
-        void DrawShip(BattleShip ship, Color color)
-        {
-            float L = (float)ship.sc.Length * AS, B = (float)ship.sc.Beam * AS;
-            Vector2 pivot = new Vector2(ax(ship.x), ay(ship.y));
-            Matrix4x4 prev = GUI.matrix;
-            GUIUtility.RotateAroundPivot((float)(ship.heading * Mathf.Rad2Deg), pivot);
-            var old = GUI.color;
-            GUI.color = color; GUI.DrawTexture(new Rect(pivot.x - L * 0.5f, pivot.y - B * 0.5f, L, B), white);
-            GUI.color = new Color(0.914f, 0.886f, 0.812f, 0.5f + 0.5f * (float)(ship.areas.masts / Tuning.AreaMax));
-            GUI.DrawTexture(new Rect(pivot.x - L * 0.12f, pivot.y - B * 0.42f, L * 0.26f, B * 0.84f), white);  // sail
-            GUI.color = Ink; GUI.DrawTexture(new Rect(pivot.x + L * 0.42f, pivot.y - 2, L * 0.1f, 4), white);   // bow mark
-            GUI.color = old;
-            GUI.matrix = prev;
-        }
-
         void BattleScreen()
         {
             var b = game.battle; var p = b.player; var e = b.enemy;
             SeaBackground();
-            // arena frame + wind + range ring
-            var old = GUI.color; GUI.color = new Color(1, 1, 1, 0.08f);
-            GUI.DrawTexture(new Rect(ax(0), ay(0), (float)Tuning.ArenaW * AS, 1), white);
-            GUI.DrawTexture(new Rect(ax(0), ay(Tuning.ArenaH), (float)Tuning.ArenaW * AS, 1), white);
-            GUI.color = old;
-            // wind arrow
-            Matrix4x4 pm = GUI.matrix; GUIUtility.RotateAroundPivot((float)(b.windDir * Mathf.Rad2Deg), new Vector2(70, 40));
-            Fill(44, 39, 52, 3, Hi); GUI.matrix = pm;
-            Txt("WIND", 40, 50, 12, Dim, TextAnchor.UpperCenter, false, 60);
 
-            DrawShip(e, e.surrendered ? new Color(0.478f, 0.416f, 0.333f) : Red);
-            DrawShip(p, Wood);
+            // two ship-status panels: yours (left), the enemy's (right)
+            ShipStatus(12, 16, 448, p, false);
+            ShipStatus(500, 16, 448, e, true);
 
-            // grapple hint
-            double dd = Mathf.Sqrt((float)((p.x - e.x) * (p.x - e.x) + (p.y - e.y) * (p.y - e.y)));
-            if (dd <= Tuning.GrappleRange * 1.6 && !e.sunk)
-                DrawLineCol(ax(p.x), ay(p.y), ax(e.x), ay(e.y), dd <= Tuning.GrappleRange ? Green : new Color(1, 1, 1, 0.25f));
+            // crew stations — the heart of it
+            StationsPanel(12, 224, 936, 196);
 
-            // combat log
-            float ly = 64; foreach (var l in b.log) { Txt(l, W - 420, ly, 13, Dim, TextAnchor.UpperRight, false, 404); ly += 17; }
+            // bottom: shot / target / fire / board / pause + log
+            BattleControls();
 
-            BattleHUD();
             if (b.outcome != null) OutcomeOverlay();
             else if (b.boarding != null) BoardingOverlay();
         }
 
-        void DrawLineCol(float x1, float y1, float x2, float y2, Color c) { var old = GUI.color; GUI.color = c; DrawLine(x1, y1, x2, y2, 2); GUI.color = old; }
-
-        void AreaRow(string label, double cond, float x, float y, bool clickable, Battle b)
+        void ShipStatus(float x, float y, float w, BattleShip s, bool isEnemy)
         {
-            float frac = (float)(cond / Tuning.AreaMax);
-            Color col = frac > 0.5f ? Green : frac > 0.25f ? Gold : Danger;
-            bool sel = clickable && b.target == LabelToKey(label);
-            if (clickable && Hit(x, y - 2, 150, 17)) b.SetTarget(LabelToKey(label));
-            Txt((sel ? "> " : "") + label, x + 2, y, 12, sel ? Hi : TextC);
-            Bar(x + 60, y + 2, 84, 9, frac, col);
+            var b = game.battle;
+            PanelBox(x, y, w, 196);
+            Color accent = isEnemy ? Red : Hi;
+            Txt((isEnemy ? "ENEMY " : "YOUR ") + s.sc.Name.ToUpper(), x + 14, y + 10, 15, accent, TextAnchor.UpperLeft, true);
+            if (isEnemy && s.surrendered) Txt("struck her colours!", x + w - 150, y + 12, 13, Gold, TextAnchor.UpperRight, true, 136);
+
+            int crew = isEnemy ? s.crew : game.run.crew.Count;
+            double ev = isEnemy ? b.EnemyEvasion() : b.PlayerEvasion();
+            Txt("Crew " + crew, x + 14, y + 32, 12, Dim);
+            Txt("Evade " + Mathf.RoundToInt((float)ev * 100) + "%", x + 108, y + 32, 12, Dim);
+            string guns = "Guns " + b.LoadedCannons(s) + "/" + b.OperationalCannons(s) + (isEnemy ? "" : "  (" + b.CrewedCannons() + " crewed)");
+            Txt(guns, x + 210, y + 32, 12, Dim);
+
+            float ry = y + 54;
+            foreach (var k in Database.Areas)
+            {
+                bool sel = isEnemy && b.target == k;
+                if (isEnemy && Hit(x + 12, ry - 2, w - 24, 16)) b.SetTarget(k);
+                float frac = (float)(s.areas.Get(k) / Tuning.AreaMax);
+                Color col = frac > 0.5f ? Green : frac > 0.25f ? Gold : Danger;
+                Txt((sel ? "▸ " : "") + Database.AreaInfo[k].Label, x + 16, ry, 12, sel ? Hi : TextC);
+                Bar(x + 96, ry + 2, w - 176, 9, frac, col);
+                ry += 18;
+            }
+            Txt("Water", x + 16, ry, 12, Blue);
+            Bar(x + 96, ry + 2, w - 176, 9, (float)(s.water / Tuning.FloodSink), Blue);
+            if (isEnemy) Txt("click an area to aim", x + 16, y + 36, 11, Dim, TextAnchor.UpperRight, false, w - 32);
+
+            ReloadPips(x + 16, ry + 22, w - 32, s);
         }
-        static string LabelToKey(string label) => label.ToLower();
 
-        void BattleHUD()
+        // A row of little bars, one per operational gun, filling as it reloads; gold when run out.
+        void ReloadPips(float x, float y, float maxw, BattleShip s)
         {
-            var b = game.battle; var p = b.player; var e = b.enemy;
-            PanelBox(0, HUD_TOP, W, H - HUD_TOP);
-            float y0 = HUD_TOP;
+            int op = game.battle.OperationalCannons(s);
+            if (op <= 0) { Txt("guns dismounted", x, y - 2, 11, Danger); return; }
+            float gap = 3;
+            float pw = Mathf.Min(16f, (maxw - (op - 1) * gap) / op);
+            for (int i = 0; i < op && i < s.cannons.Count; i++)
+            {
+                var cn = s.cannons[i];
+                float px = x + i * (pw + gap);
+                float frac = cn.loaded ? 1f : (cn.reloadMax > 0 ? 1f - (float)(cn.reload / cn.reloadMax) : 0f);
+                Fill(px, y, pw, 8, Ink);
+                if (frac > 0) Fill(px, y, pw * Mathf.Clamp01(frac), 8, cn.loaded ? Gold : new Color(0.49f, 0.38f, 0.19f));
+            }
+        }
 
-            // left: your ship
-            Txt("YOUR " + p.sc.Name.ToUpper(), 12, y0 + 10, 15, Hi, TextAnchor.UpperLeft, true);
-            Txt("Crew " + game.run.crew.Count + "   Sail " + Mathf.RoundToInt((float)p.sailLevel * 100) + "%", 12, y0 + 30, 13, Dim);
-            float ry = y0 + 52;
-            foreach (var k in Database.Areas) { AreaRow(Database.AreaInfo[k].Label, p.areas.Get(k), 12, ry, false, b); ry += 17; }
-            Txt("Water", 170, y0 + 52, 12, TextC); Bar(170, y0 + 66, 90, 9, (float)(p.water / Tuning.FloodSink), Blue);
+        static readonly Station[] StationOrder = { Station.Guns, Station.Sails, Station.Pumps, Station.Repair };
+        static readonly string[] StationNames = { "GUN DECK", "RIGGING", "BILGE PUMPS", "REPAIR PARTY" };
+        static readonly string[] StationEffects =
+        {
+            "work the guns: reload + aim", "set the sails: dodge shot, mend masts",
+            "man the pumps: bail water, patch hull", "damage control: mend rudder/guns/deck",
+        };
 
-            // middle: enemy
-            float mx = 300;
-            Txt("ENEMY " + e.sc.Name.ToUpper(), mx, y0 + 10, 15, Red, TextAnchor.UpperLeft, true);
-            Txt("Crew " + e.crew + (e.surrendered ? "  (struck!)" : ""), mx, y0 + 30, 13, e.surrendered ? Gold : Dim);
-            Txt("Target (click):", mx, y0 + 48, 11, Dim);
-            float ey = y0 + 66;
-            foreach (var k in Database.Areas) { AreaRow(Database.AreaInfo[k].Label, e.areas.Get(k), mx, ey, true, b); ey += 17; }
+        void StationsPanel(float x, float y, float w, float h)
+        {
+            var b = game.battle;
+            PanelBox(x, y, w, h);
+            string hint = selectedCrew != null
+                ? "Posting " + selectedCrew.name + " — click a station"
+                : "CREW — click a mate, then a station to post them";
+            Txt(hint, x + 14, y + 8, 13, Hi, TextAnchor.UpperLeft, true);
 
-            // right: shot + fire + board + pause
-            float rx = 560;
-            Txt("SHOT", rx, y0 + 10, 12, Dim);
+            int n = StationOrder.Length;
+            float gap = 12, bw = (w - 28 - (n - 1) * gap) / n, by = y + 32, bh = h - 44;
+            for (int i = 0; i < n; i++)
+                StationBox(x + 14 + i * (bw + gap), by, bw, bh, StationOrder[i], StationNames[i], StationEffects[i]);
+        }
+
+        void StationBox(float x, float y, float w, float h, Station st, string name, string eff)
+        {
+            var b = game.battle;
+            Fill(x, y, w, h, PanelLt);
+            bool armed = selectedCrew != null;
+            if (Btn(x, y, w, 22, name + "  (" + b.CountAt(st) + ")", 12, armed ? Wood : new Color(0.09f, 0.16f, 0.2f)))
+            {
+                if (selectedCrew != null) { b.AssignStation(selectedCrew, st); selectedCrew = null; }
+            }
+            Txt(eff, x + 6, y + 25, 10, Dim, TextAnchor.UpperLeft, false, w - 12, true);
+
+            float ty = y + 48;
+            foreach (var c in game.run.crew)
+            {
+                if (c.station != st) continue;
+                if (ty > y + h - 18) break;
+                bool self = c == selectedCrew;
+                Color bg = self ? Hi : (c.hp < c.maxHp ? new Color(0.36f, 0.27f, 0.11f) : new Color(0.07f, 0.13f, 0.17f));
+                if (Btn(x + 6, ty, w - 12, 18, ShortName(c.name) + (c.hp < c.maxHp ? " ✚" : ""), 11, bg))
+                    selectedCrew = self ? null : c;
+                ty += 20;
+            }
+        }
+
+        static string ShortName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "hand";
+            int sp = name.IndexOf(' ');
+            return sp > 0 ? name.Substring(0, sp) : name;
+        }
+
+        void BattleControls()
+        {
+            var b = game.battle; var p = b.player;
+            PanelBox(0, 430, W, H - 430);
+
+            // shot select
+            Txt("SHOT", 16, 440, 12, Dim);
             int i = 0;
             foreach (var k in new[] { "round", "chain", "grape" })
             {
-                if (Btn(rx, y0 + 26 + i * 24, 150, 20, Database.Shots[k].Label, 13, b.shot == k ? Green : PanelLt)) b.SetShot(k);
+                if (Btn(16, 458 + i * 26, 150, 22, Database.Shots[k].Label, 12, b.shot == k ? Green : PanelLt)) b.SetShot(k);
                 i++;
             }
-            string bear = b.BearingSide(p, e);
-            Txt(bear != null ? ("> " + bear + " battery bears") : "turn to bring guns to bear", rx, y0 + 100, 12, bear != null ? Green : Dim);
+            Txt(Database.Shots[b.shot].Desc, 16, 540, 11, Dim, TextAnchor.UpperLeft, false, 160, true);
 
-            float fx = 730;
-            bool canFire = bear != null && b.SideLoaded(p, bear) > 0;
-            if (Btn(fx, y0 + 20, 120, 40, "FIRE  (F)", 16, canFire ? new Color(0.478f, 0.239f, 0.165f) : PanelLt, !canFire)) b.FirePlayer();
+            // target + log
+            Txt("Aiming: " + Database.AreaInfo[b.target].Label + "  ·  click an enemy area to change", 190, 440, 12, Hi);
+            float ly = 462; foreach (var l in b.log) { Txt(l, 190, ly, 12, Dim, TextAnchor.UpperLeft, false, 470); ly += 16; }
+
+            // fire / board / pause
+            float fx = W - 196;
+            bool canFire = b.OperationalCannons(p) > 0 && b.LoadedCannons(p) > 0;
+            if (Btn(fx, 444, 180, 44, "FIRE  (F)", 18, canFire ? new Color(0.478f, 0.239f, 0.165f) : PanelLt, !canFire)) b.FirePlayer();
             bool canBoard = b.CanBoard();
-            if (Btn(fx, y0 + 66, 120, 28, canBoard ? "BOARD (B)" : "board...", 13, canBoard ? new Color(0.478f, 0.239f, 0.165f) : PanelLt, !canBoard)) b.TryBoard();
-            if (Btn(fx, y0 + 100, 120, 24, b.paused ? "Resume" : "Pause (Space)", 12)) b.TogglePause();
+            if (Btn(fx, 494, 180, 30, "BOARD  (B)", 14, canBoard ? Wood : PanelLt, !canBoard)) b.TryBoard();
+            if (Btn(fx, 528, 180, 26, b.paused ? "Resume  (Space)" : "Pause  (Space)", 12)) b.TogglePause();
 
-            if (b.paused) Txt("- PAUSED -", 0, HUD_TOP - 22, 16, Hi, TextAnchor.UpperCenter, true);
-            if (b.flashT > 0) Txt(b.flash, 0, HUD_TOP - 22, 14, Danger, TextAnchor.UpperCenter, true);
+            if (b.paused) Txt("— PAUSED —  give orders freely", 0, 410, 15, Hi, TextAnchor.UpperCenter, true);
+            if (b.flashT > 0) Txt(b.flash, 0, 410, 14, Danger, TextAnchor.UpperCenter, true);
         }
 
         void BoardingOverlay()

@@ -20,15 +20,22 @@ namespace BlackTide.Core
         public const double WindMaxFactor = 1.35;   // running before the wind
         public const double Accel = 70;
 
-        // Gunnery — cannons are crew-manned; the gunner's skill sets reload + aim.
+        // Gunnery — cannons are crew-manned; the gunners' skill sets reload + aim.
         public const double ReloadBase = 3.4;
         public const double GunnerReloadK = 0.25;
         public const double GunnerAccK = 0.05;
-        public const double GunArcDeg = 40;
+        public const double GunArcDeg = 40;             // (legacy; unused in the station model)
         public const double AccuracyBase = 0.62;
-        public const double AccuracyRangeFalloff = 0.45;
-        public const double AccuracyMotionPenalty = 0.30;
+        public const double AccuracyRangeFalloff = 0.45; // (legacy)
+        public const double AccuracyMotionPenalty = 0.30; // (legacy)
         public const double AreaMax = 100;
+
+        // Station combat (FTL-style): crew are posted to stations; no positions.
+        public const int CannonsPerGunner = 2;          // guns a single hand can keep in action
+        public const double EvasionBase = 0.05;          // base chance a volley goes wide
+        public const double EvasionPerSailor = 0.07;     // per hand worked at the rigging
+        public const double EvasionMax = 0.6;
+        public const double RepairRate = 2.2;            // area points/sec per effective hand on repair
 
         // Damage / flooding
         public const double FloodGain = 0.045;
